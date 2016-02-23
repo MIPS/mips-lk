@@ -2,9 +2,13 @@ LOCAL_DIR := $(GET_LOCAL_DIR)
 
 MODULE := $(LOCAL_DIR)
 
-MODULE_DEPS := \
-	lib/heap \
-	lib/io
+ifneq (true,$(call TOBOOL,$(WITH_LIBC_CUSTOM_MALLOC)))
+MODULE_DEPS += lib/heap
+endif
+
+ifneq (true,$(call TOBOOL,$(WITH_LIBC_CUSTOM_STDIO)))
+MODULE_DEPS += lib/io
+endif
 
 MODULE_SRCS += \
 	$(LOCAL_DIR)/atoi.c \

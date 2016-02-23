@@ -133,6 +133,18 @@ void console_init_hook(uint level)
 LK_INIT_HOOK(console, console_init_hook, LK_INIT_LEVEL_PLATFORM_EARLY - 1);
 #endif
 
+#define DEFINE_STDIO_DESC(id)   \
+    [(id)]  = {                 \
+        .io = &console_io,      \
+    }
+
+FILE __stdio_FILEs[3] = {
+    DEFINE_STDIO_DESC(0), /* stdin */
+    DEFINE_STDIO_DESC(1), /* stdout */
+    DEFINE_STDIO_DESC(2), /* stderr */
+};
+#undef DEFINE_STDIO_DESC
+
 /* global console io handle */
 static const io_handle_hooks_t console_io_hooks = {
     .write  = __debug_stdio_write,

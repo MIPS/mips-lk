@@ -27,18 +27,6 @@
 #include <sys/types.h>
 #include <platform/debug.h>
 
-#define DEFINE_STDIO_DESC(id)   \
-    [(id)]  = {                 \
-        .io = &console_io,      \
-    }
-
-FILE __stdio_FILEs[3] = {
-    DEFINE_STDIO_DESC(0), /* stdin */
-    DEFINE_STDIO_DESC(1), /* stdout */
-    DEFINE_STDIO_DESC(2), /* stderr */
-};
-#undef DEFINE_STDIO_DESC
-
 int fputc(int _c, FILE *fp)
 {
     unsigned char c = _c;
