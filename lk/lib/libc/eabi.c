@@ -51,12 +51,13 @@ void raise(void)
 {
 }
 
+#if WITH_CPP_SUPPORT
 extern int __cxa_atexit(void (*func)(void *), void *arg, void *d);
 
 int __aeabi_atexit(void *arg, void (*func)(void *), void *d)
 {
     return __cxa_atexit(func, arg, d);
 }
-
+#endif
 
 
