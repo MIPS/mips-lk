@@ -55,7 +55,7 @@ extern int _end;
 extern int _end_of_ram;
 
 #define MEM_START ((uintptr_t)&_end)
-#define MEM_SIZE ((MEMBASE + MEMSIZE) - MEM_START)
+#define MEM_SIZE ((uintptr_t)&_end_of_ram - MEM_START)
 #define DEFAULT_MAP_SIZE (MEMSIZE >> PAGE_SIZE_SHIFT)
 
 /* a static list of arenas */
