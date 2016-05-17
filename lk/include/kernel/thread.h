@@ -80,6 +80,7 @@ enum thread_tls_list {
 #define THREAD_FLAG_DEBUG_STACK_BOUNDS_CHECK  (1<<5)
 
 #define THREAD_MAGIC (0x74687264) // 'thrd'
+#define THREAD_NAME_LEN 32
 
 typedef struct thread {
     int magic;
@@ -121,7 +122,7 @@ typedef struct thread {
     /* thread local storage */
     uintptr_t tls[MAX_TLS_ENTRY];
 
-    char name[32];
+    char name[THREAD_NAME_LEN];
 } thread_t;
 
 #if WITH_SMP
