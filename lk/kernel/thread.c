@@ -83,6 +83,7 @@ static thread_t _idle_thread;
 /* local routines */
 static void thread_resched(void);
 static void idle_thread_routine(void) __NO_RETURN;
+static const char *thread_state_to_str(enum thread_state state);
 
 #if PLATFORM_HAS_DYNAMIC_TIMER
 /* preemption timer */
@@ -112,6 +113,20 @@ static void insert_in_run_queue_tail(thread_t *t)
 
     list_add_tail(&run_queue[t->priority], &t->queue_node);
     run_queue_bitmap |= (1<<t->priority);
+}
+
+static void delete_from_run_queue(thread_t *t)
+{
+    DEBUG_ASSERT(t->magic == THREAD_MAGIC);
+    DEBUG_ASSERT(t->state == THREAD_READY);
+    DEBUG_ASSERT(list_in_list(&t->queue_node)); // assert already in list
+    DEBUG_ASSERT(arch_ints_disabled());
+    DEBUG_ASSERT(spin_lock_held(&thread_lock));
+
+    list_delete(&t->queue_node);
+
+    if (list_is_empty(&run_queue[t->priority]))
+        run_queue_bitmap &= ~(1<<t->priority);
 }
 
 static void init_thread_struct(thread_t *t, const char *name)
@@ -403,7 +418,7 @@ void thread_exit(int retcode)
     DEBUG_ASSERT(current_thread->state == THREAD_RUNNING);
     DEBUG_ASSERT(!thread_is_idle(current_thread));
 
-//  dprintf("thread_exit: current %p\n", current_thread);
+//  dprintf(INFO, "thread_exit: current %p\n", current_thread);
 
     THREAD_LOCK(state);
 
@@ -438,6 +453,62 @@ void thread_exit(int retcode)
     thread_resched();
 
     panic("somehow fell through thread_exit()\n");
+}
+
+/**
+ * @brief  Force terminate a non-current thread and reclaim thread resources.
+ *
+ * Note: Killing a thread potentially leaves behind unusable and unreclaimed
+ * resources (i.e. mutexes, unfreed memory) used by the thread application.
+ * Using thread_exit is preferrable.
+ */
+void thread_kill(thread_t *t, int retcode)
+{
+    if (get_current_thread() == t)
+        thread_exit(retcode);
+
+    DEBUG_ASSERT(t->magic == THREAD_MAGIC);
+    DEBUG_ASSERT(!thread_is_idle(t));
+
+    dprintf(INFO, "thread_kill: killing %s state %s\n", t->name, thread_state_to_str(t->state));
+
+    THREAD_LOCK(state);
+
+    switch (t->state) {
+        case THREAD_SUSPENDED:
+            DEBUG_ASSERT(!list_in_list(&t->queue_node));
+            break;
+        case THREAD_READY:
+            delete_from_run_queue(t);
+            break;
+        case THREAD_RUNNING:
+            break;
+        case THREAD_BLOCKED:
+            dprintf(INFO, "thread_kill: warning some resources may be left unusable\n");
+            if (t->wait_queue_timer.magic == TIMER_MAGIC)
+                timer_cancel(&t->wait_queue_timer);
+            // unblocking thread inserts it at head of run queue
+            thread_unblock_from_wait_queue(t, ERR_OBJECT_DESTROYED);
+            DEBUG_ASSERT(t->state == THREAD_READY);
+            delete_from_run_queue(t);
+            break;
+        case THREAD_SLEEPING:
+            timer_cancel(&t->sleep_timer);
+            break;
+        case THREAD_DEATH:
+            break;
+        default:
+            dprintf(INFO, "thread_kill: unknown thread state %#x\n", t->state);
+            break;
+    }
+
+    /* enter the dead state */
+    t->state = THREAD_DEATH;
+    t->retcode = retcode;
+
+    thread_detach(t);
+
+    THREAD_UNLOCK(state);
 }
 
 static void idle_thread_routine(void)
@@ -771,18 +842,17 @@ static enum handler_return thread_sleep_handler(timer_t *timer, lk_time_t now, v
  */
 void thread_sleep(lk_time_t delay)
 {
-    timer_t timer;
-
     thread_t *current_thread = get_current_thread();
+    timer_t *timer = &current_thread->sleep_timer;
 
     DEBUG_ASSERT(current_thread->magic == THREAD_MAGIC);
     DEBUG_ASSERT(current_thread->state == THREAD_RUNNING);
     DEBUG_ASSERT(!thread_is_idle(current_thread));
 
-    timer_initialize(&timer);
+    timer_initialize(timer);
 
     THREAD_LOCK(state);
-    timer_set_oneshot(&timer, delay, thread_sleep_handler, (void *)current_thread);
+    timer_set_oneshot(timer, delay, thread_sleep_handler, (void *)current_thread);
     current_thread->state = THREAD_SLEEPING;
     thread_resched();
     THREAD_UNLOCK(state);
@@ -1093,9 +1163,8 @@ static enum handler_return wait_queue_timeout_handler(timer_t *timer, lk_time_t 
  */
 status_t wait_queue_block(wait_queue_t *wait, lk_time_t timeout)
 {
-    timer_t timer;
-
     thread_t *current_thread = get_current_thread();
+    timer_t *timer = &current_thread->wait_queue_timer;
 
     DEBUG_ASSERT(wait->magic == WAIT_QUEUE_MAGIC);
     DEBUG_ASSERT(current_thread->state == THREAD_RUNNING);
@@ -1113,15 +1182,15 @@ status_t wait_queue_block(wait_queue_t *wait, lk_time_t timeout)
 
     /* if the timeout is nonzero or noninfinite, set a callback to yank us out of the queue */
     if (timeout != INFINITE_TIME) {
-        timer_initialize(&timer);
-        timer_set_oneshot(&timer, timeout, wait_queue_timeout_handler, (void *)current_thread);
+        timer_initialize(timer);
+        timer_set_oneshot(timer, timeout, wait_queue_timeout_handler, (void *)current_thread);
     }
 
     thread_resched();
 
     /* we don't really know if the timer fired or not, so it's better safe to try to cancel it */
     if (timeout != INFINITE_TIME) {
-        timer_cancel(&timer);
+        timer_cancel(timer);
     }
 
     return current_thread->wait_queue_block_ret;

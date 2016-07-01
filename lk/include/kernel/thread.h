@@ -30,6 +30,7 @@
 #include <arch/ops.h>
 #include <arch/thread.h>
 #include <kernel/wait.h>
+#include <kernel/timer.h>
 #include <kernel/spinlock.h>
 #include <debug.h>
 
@@ -103,6 +104,8 @@ typedef struct thread {
     /* if blocked, a pointer to the wait queue */
     struct wait_queue *blocking_wait_queue;
     status_t wait_queue_block_ret;
+    timer_t wait_queue_timer;
+    timer_t sleep_timer;
 
     /* architecture stuff */
     struct arch_thread arch;
@@ -166,6 +169,7 @@ thread_t *thread_create(const char *name, thread_start_routine entry, void *arg,
 thread_t *thread_create_etc(thread_t *t, const char *name, thread_start_routine entry, void *arg, int priority, void *stack, size_t stack_size);
 status_t thread_resume(thread_t *);
 void thread_exit(int retcode) __NO_RETURN;
+void thread_kill(thread_t *t, int retcode);
 void thread_sleep(lk_time_t delay);
 status_t thread_detach(thread_t *t);
 status_t thread_join(thread_t *t, int *retcode, lk_time_t timeout);
