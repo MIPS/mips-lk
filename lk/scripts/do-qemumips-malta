@@ -1,0 +1,35 @@
+#!/bin/bash
+
+function HELP {
+    echo "help:"
+    echo "-p <project>"
+    echo "-h for help"
+    echo "all arguments after -- are passed to qemu directly"
+    exit 1
+}
+
+DEFAULT_PROJECT=mips-malta-test
+PROJECT=''
+
+while getopts p:h FLAG; do
+    case $FLAG in
+        p) PROJECT=$OPTARG;;
+        h) HELP;;
+        \?)
+            echo unrecognized option
+            HELP
+    esac
+done
+
+shift $((OPTIND-1))
+
+if [[ -z $PROJECT ]]; then
+    PROJECT=$DEFAULT_PROJECT
+fi
+
+QEMU="qemu-system-mipsel -machine malta -cpu P5600"
+ARGS="-nographic -kernel build-${PROJECT}/lk.elf -gdb tcp::1234"
+
+make $PROJECT -j8 &&
+echo $QEMU $ARGS $@ &&
+$QEMU $ARGS $@

@@ -10,13 +10,12 @@ MODULE_SRCS += \
 	$(LOCAL_DIR)/thread.c \
 	$(LOCAL_DIR)/timer.c \
 	$(LOCAL_DIR)/vectors.S \
-
-#	$(LOCAL_DIR)/cache.c \
-	$(LOCAL_DIR)/cache-ops.S \
-	$(LOCAL_DIR)/ops.S \
+	$(LOCAL_DIR)/cache.c \
 	$(LOCAL_DIR)/mmu.c \
-	$(LOCAL_DIR)/faults.c \
-	$(LOCAL_DIR)/descriptor.c
+	$(LOCAL_DIR)/tlb.c \
+
+MODULE_DEPS += \
+	arch/mips/hal
 
 GLOBAL_DEFINES += \
 	SMP_MAX_CPUS=1
@@ -45,6 +44,9 @@ endif
 ifeq ($(MIPS_CPU),microaptiv-uc)
 ARCH_COMPILEFLAGS += -march=m14k
 endif
+ifeq ($(MIPS_CPU),mips32r2)
+ARCH_COMPILEFLAGS += -march=mips32r2
+endif
 
 LIBGCC := $(shell $(TOOLCHAIN_PREFIX)gcc $(GLOBAL_COMPILEFLAGS) $(ARCH_COMPILEFLAGS) $(GLOBAL_CFLAGS) -print-libgcc-file-name)
 $(info LIBGCC = $(LIBGCC))
@@ -52,7 +54,17 @@ $(info LIBGCC = $(LIBGCC))
 cc-option = $(shell if test -z "`$(1) $(2) -S -o /dev/null -xc /dev/null 2>&1`"; \
 	then echo "$(2)"; else echo "$(3)"; fi ;)
 
-KERNEL_BASE ?= $(MEMBASE)
+# we have a mmu and want the vmm/pmm
+WITH_KERNEL_VM ?= 1
+
+ifeq ($(WITH_KERNEL_VM),1)
+GLOBAL_DEFINES += \
+    KERNEL_ASPACE_BASE=0x80000000 \
+    KERNEL_ASPACE_SIZE=0x80000000
+endif
+
+MEMBASE ?= 0
+KERNEL_BASE ?= 0x80000000
 KERNEL_LOAD_OFFSET ?= 0
 VECTOR_BASE_PHYS ?= 0
 
@@ -62,9 +74,15 @@ GLOBAL_DEFINES += \
     KERNEL_BASE=$(KERNEL_BASE) \
     KERNEL_LOAD_OFFSET=$(KERNEL_LOAD_OFFSET)
 
+ifneq ($(ARCH_PAGE_SIZE),)
+GLOBAL_DEFINES += \
+    ARCH_PAGE_SIZE=$(ARCH_PAGE_SIZE)
+endif
+
 # potentially generated files that should be cleaned out with clean make rule
 GENERATED += \
-	$(BUILDDIR)/linker.ld
+	$(BUILDDIR)/linker.ld \
+	$(BUILDDIR)/linker-malta.ld
 
 # rules for generating the linker
 $(BUILDDIR)/linker.ld: $(LOCAL_DIR)/linker.ld $(wildcard arch/*.ld) linkerscript.phony
@@ -73,9 +91,13 @@ $(BUILDDIR)/linker.ld: $(LOCAL_DIR)/linker.ld $(wildcard arch/*.ld) linkerscript
 	$(NOECHO)sed "s/%MEMBASE%/$(MEMBASE)/;s/%MEMSIZE%/$(MEMSIZE)/;s/%KERNEL_BASE%/$(KERNEL_BASE)/;s/%KERNEL_LOAD_OFFSET%/$(KERNEL_LOAD_OFFSET)/;s/%VECTOR_BASE_PHYS%/$(VECTOR_BASE_PHYS)/" < $< > $@.tmp
 	@$(call TESTANDREPLACEFILE,$@.tmp,$@)
 
+$(BUILDDIR)/linker-malta.ld: $(LOCAL_DIR)/linker-malta.ld $(wildcard arch/*.ld) linkerscript.phony
+	@echo generating $@
+	@$(MKDIR)
+	$(NOECHO)sed "s/%MEMBASE%/$(MEMBASE)/;s/%MEMSIZE%/$(MEMSIZE)/;s/%KERNEL_BASE%/$(KERNEL_BASE)/;s/%KERNEL_LOAD_OFFSET%/$(KERNEL_LOAD_OFFSET)/;s/%VECTOR_BASE_PHYS%/$(VECTOR_BASE_PHYS)/" < $< > $@.tmp
+	@$(call TESTANDREPLACEFILE,$@.tmp,$@)
+
 linkerscript.phony:
 .PHONY: linkerscript.phony
-
-LINKER_SCRIPT += $(BUILDDIR)/linker.ld
 
 include make/module.mk

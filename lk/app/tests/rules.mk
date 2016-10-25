@@ -17,6 +17,15 @@ MODULE_SRCS += \
     $(LOCAL_DIR)/thread_kill_tests.c \
     $(LOCAL_DIR)/port_tests.c \
 
+ifeq ($(ARCH),mips)
+MODULE_SRCS += \
+    $(LOCAL_DIR)/mips_tests.c \
+
+MODULE_DEPS += \
+    lib/unittest \
+
+endif
+
 MODULE_ARM_OVERRIDE_SRCS := \
 
 MODULE_COMPILEFLAGS += -Wno-format -fno-builtin

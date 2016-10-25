@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2014 Travis Geiselbrecht
+ * Copyright (c) 2015-2016 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -20,24 +20,20 @@
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef __APP_TESTS_H
-#define __APP_TESTS_H
+#pragma once
 
-#include <lib/console.h>
+#include <compiler.h>
 
-int thread_tests(void);
-int thread_kill_tests(void);
-int port_tests(void);
-void printf_tests(void);
-void printf_tests_float(void);
-void clock_tests(void);
-void benchmarks(void);
-int fibo(int argc, const cmd_args *argv);
-int spinner(int argc, const cmd_args *argv);
+__BEGIN_CDECLS
 
-#if ARCH_MIPS
-void mips_tests(void);
-#endif
+struct arch_aspace {
+    /* pointer to the translation table */
+    paddr_t tt_phys;
+    uint32_t *tt_virt;
 
-#endif
+    /* range of address space */
+    vaddr_t base;
+    size_t size;
+};
 
+__END_CDECLS

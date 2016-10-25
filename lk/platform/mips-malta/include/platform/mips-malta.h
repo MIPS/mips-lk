@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2014 Travis Geiselbrecht
+ * Copyright (c) 2016 Imagination Technologies Ltd.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -20,24 +20,50 @@
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef __APP_TESTS_H
-#define __APP_TESTS_H
+#pragma once
 
-#include <lib/console.h>
+#include <stdint.h>
 
-int thread_tests(void);
-int thread_kill_tests(void);
-int port_tests(void);
-void printf_tests(void);
-void printf_tests_float(void);
-void clock_tests(void);
-void benchmarks(void);
-int fibo(int argc, const cmd_args *argv);
-int spinner(int argc, const cmd_args *argv);
+/*
+ * The mips malta target for qemu has an emulated GT64120 system controller
+ */
+#define GT64120_BASE ((volatile uint8_t *)0xbbe00000)
+#define GT64120_PCI0_IACK (0xc34)
 
-#if ARCH_MIPS
-void mips_tests(void);
-#endif
+/*
+ * The mips malta target for qemu has an emulated PC style UART mapped
+ * into the ISA io port apterture at 0x18000000; access it through uncached
+ * KSEG1 segment @ 0xa0000000
+ */
+#define ISA_IO_BASE ((volatile uint8_t *)0x18000000 + 0xa0000000)
+#define UART_PORT_BASE (0x3f8)
 
-#endif
+static inline void isa_write_8(uint16_t port, uint8_t val)
+{
+    volatile uint8_t *addr = ISA_IO_BASE + port;
 
+    *addr = val;
+}
+
+static inline uint8_t isa_read_8(uint16_t port)
+{
+    volatile uint8_t *addr = ISA_IO_BASE + port;
+
+    return *addr;
+}
+
+static inline void syscon_write_8(uint16_t port, uint8_t val)
+{
+    volatile uint8_t *addr = GT64120_BASE + port;
+
+    *addr = val;
+}
+
+static inline uint8_t syscon_read_8(uint16_t port)
+{
+    volatile uint8_t *addr = GT64120_BASE + port;
+
+    return *addr;
+}
+
+#define INT_VECTORS 8

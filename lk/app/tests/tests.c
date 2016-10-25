@@ -38,6 +38,9 @@ STATIC_COMMAND("clock_tests", "test clocks", (console_cmd)&clock_tests)
 STATIC_COMMAND("bench", "miscellaneous benchmarks", (console_cmd)&benchmarks)
 STATIC_COMMAND("fibo", "threaded fibonacci", (console_cmd)&fibo)
 STATIC_COMMAND("spinner", "create a spinning thread", (console_cmd)&spinner)
+#if ARCH_MIPS
+STATIC_COMMAND("mips_tests", "mips arch-specific tests", (console_cmd)&mips_tests)
+#endif
 STATIC_COMMAND_END(tests);
 
 #endif

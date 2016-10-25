@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2014 Travis Geiselbrecht
+ * Copyright (c) 2016 Imagination Technologies Ltd.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -20,24 +20,39 @@
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef __APP_TESTS_H
-#define __APP_TESTS_H
+#include <sys/types.h>
+#include <mips/m32tlb.h>
+#include <mips/m32c0.h>
+#include <arch/mips.h>
 
-#include <lib/console.h>
+void mips_invalidate_tlb_global(void)
+{
+    mips_tlbinvalall();
+}
 
-int thread_tests(void);
-int thread_kill_tests(void);
-int port_tests(void);
-void printf_tests(void);
-void printf_tests_float(void);
-void clock_tests(void);
-void benchmarks(void);
-int fibo(int argc, const cmd_args *argv);
-int spinner(int argc, const cmd_args *argv);
+void mips_invalidate_tlb_asid(vaddr_t va, uint32_t asid)
+{
+    tlbhi_t entryhi = (va & ~0x1fffUL) | (asid & C0_ENTRYHI_ASID_MASK);
+    mips_tlbinval(entryhi);
+}
 
-#if ARCH_MIPS
-void mips_tests(void);
-#endif
+#define PG_RIE (1 << 31)
+#define PG_XIE (1 << 30)
+#define PG_IEC (1 << 27)
 
-#endif
+void mips_tlb_init(void)
+{
+#if (WITH_KERNEL_VM)
+    mips_tlbinvalall();
 
+    /* enable read and execute inhibit if implemented */
+    if (mips_read_c0_config3() & CFG3_RXI)
+    {
+        mips_write_c0_entryhi(0);
+        mips_write_c0_entrylo0(0);
+        mips_write_c0_entrylo1(0);
+        mips_write_c0_pagemask(3<<11);
+        mips_write_c0_pagegrain(PG_RIE | PG_XIE | PG_IEC);
+    }
+#endif /* WITH_KERNEL_VM */
+}

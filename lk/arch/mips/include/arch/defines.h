@@ -22,10 +22,40 @@
  */
 #pragma once
 
-#define PAGE_SIZE 4096
-#define PAGE_SIZE_SHIFT 12
+#define SHIFT_4K            (12)
+#define PAGE_SIZE_4K        (1 << SHIFT_4K)
+
+#define SHIFT_16K           (14)
+#define PAGE_SIZE_16K       (1 << SHIFT_16K)
+
+/* check if target has page_size override */
+#if defined(ARCH_PAGE_SIZE)
+
+#if (ARCH_PAGE_SIZE == PAGE_SIZE_4K)
+# define PAGE_SIZE_SHIFT     SHIFT_4K
+# define PAGE_SIZE           (1 << PAGE_SIZE_SHIFT)
+#elif (ARCH_PAGE_SIZE == PAGE_SIZE_16K)
+# define PAGE_SIZE_SHIFT     SHIFT_16K
+# define PAGE_SIZE           (1 << PAGE_SIZE_SHIFT)
+#else
+# error Unsupported ARCH_PAGE_SIZE
+#endif
+
+#ifndef ASSEMBLY
+#include <config.h>
+#include <assert.h>
+STATIC_ASSERT(ARCH_PAGE_SIZE == PAGE_SIZE);
+#endif /* ASSEMBLY */
+
+#else /* ARCH_PAGE_SIZE */
+
+/* select default PAGE_SIZE */
+#define PAGE_SIZE_SHIFT     SHIFT_4K
+#define PAGE_SIZE           (1 << PAGE_SIZE_SHIFT)
+
+#endif /* ARCH_PAGE_SIZE */
 
 // XXX is this right?
 #define CACHE_LINE 32
 
-#define ARCH_DEFAULT_STACK_SIZE 4096
+#define ARCH_DEFAULT_STACK_SIZE PAGE_SIZE

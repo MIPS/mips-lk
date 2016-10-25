@@ -34,6 +34,7 @@ static inline void arch_enable_ints(void)
     mips_write_c0_status(status);
 #else
     __asm__ volatile("ei");
+    __asm__ volatile("ehb");
 #endif
 }
 
@@ -45,6 +46,7 @@ static inline void arch_disable_ints(void)
     mips_write_c0_status(status);
 #else
     __asm__ volatile("di");
+    __asm__ volatile("ehb");
 #endif
     CF;
 }
@@ -78,6 +80,28 @@ static inline int atomic_swap(volatile int *ptr, int val)
     return __atomic_exchange_n(ptr, val, __ATOMIC_RELAXED);
 }
 
+static inline int atomic_cmpxchg(volatile int *ptr, int oldval, int newval)
+{
+    int old;
+
+    __asm__ __volatile__(
+        "     .set    push                \n"
+        "     .set    noat                \n"
+        "     .set    noreorder           \n"
+        "1:   ll      %[old], %[ptr]      \n"
+        "     bne     %[old], %z[oldval], 2f \n"
+        "       move    $1, %z[newval]    \n"
+        "     sc      $1, %[ptr]          \n"
+        "     beqz    $1, 1b              \n"
+        "       nop                       \n"
+        "     .set    pop                 \n"
+        "2:                               \n"
+        : [old] "=&r" (old), [ptr] "+ZC" (*ptr)
+        : [oldval] "Jr" (oldval), [newval] "Jr" (newval));
+
+    return old;
+}
+
 /* use a global pointer to store the current_thread */
 extern struct thread *_current_thread;
 
@@ -98,3 +122,16 @@ static inline uint arch_curr_cpu_num(void)
     return 0;
 }
 
+#define mb()        SYNC
+#define wmb()       SYNC
+#define rmb()       SYNC
+
+#ifdef WITH_SMP
+#define smp_mb()    SYNC
+#define smp_wmb()   SYNC
+#define smp_rmb()   SYNC
+#else
+#define smp_mb()    CF
+#define smp_wmb()   CF
+#define smp_rmb()   CF
+#endif

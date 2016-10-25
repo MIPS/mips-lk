@@ -1,4 +1,6 @@
 #!/bin/sh
 
+export TOOLCHAIN_PREFIX=mips-mti-elf-
+export LITTLE_ENDIAN=1
 make qemu-mips-test -j4 &&
-qemu-system-mips -machine mips -cpu M14K -kernel build-qemu-mips-test/lk.elf -nographic $@
+qemu-system-mipsel -machine mips -cpu M14K -kernel build-qemu-mips-test/lk.elf -nographic -s $@

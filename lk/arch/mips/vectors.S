@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2016 Imagination Technologies Ltd.
  * Copyright (c) 2015 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
@@ -23,16 +24,10 @@
 #include <asm.h>
 #include <arch/mips.h>
 
-.section ".text.vectab"
-FUNCTION(vectab)
-.org 0
-_tlb_refill:
-    b       .
-
 .macro iframe_save
     .set    push
     .set    noat
-    addiu   $sp, -88
+    addiu   $sp, -IFRAME_SIZE
 
     /* save all the non temporary registers */
     sw      $at, 0($sp)
@@ -53,15 +48,22 @@ _tlb_refill:
     sw      $t8, 60($sp)
     sw      $t9, 64($sp)
     sw      $gp, 68($sp)
-    sw      $ra, 72($sp)
+    /* sp is saved earlier */
+    sw      $ra, 76($sp)
+    mfhi    $at
+    sw      $at, 80($sp)
+    mflo    $at
+    sw      $at, 84($sp)
 
     /* save the control registers */
     mfc0    $at, $12 /* status */
-    sw      $at, 76($sp)
+    sw      $at, 88($sp)
+    mfc0    $at, $8 /* badvaddr */
+    sw      $at, 92($sp)
     mfc0    $at, $13 /* cause */
-    sw      $at, 80($sp)
+    sw      $at, 96($sp)
     mfc0    $at, $14 /* epc */
-    sw      $at, 84($sp)
+    sw      $at, 100($sp)
 
     .set    pop
 .endm
@@ -89,31 +91,125 @@ _tlb_refill:
     lw      $t8, 60($sp)
     lw      $t9, 64($sp)
     lw      $gp, 68($sp)
-    lw      $ra, 72($sp)
-
-    /* restore the control registers */
-    lw      $k0, 76($sp)
-    mtc0    $k0, $12 /* status */
+    /* restore sp below */
+    lw      $ra, 76($sp)
     lw      $k0, 80($sp)
-    mtc0    $k0, $13 /* cause */
+    mthi    $k0
     lw      $k0, 84($sp)
+    mtlo    $k0
+
+    /* restore some control registers */
+    lw      $k0, 88($sp)
+    mtc0    $k0, $12 /* status */
+    lw      $k0, 100($sp)
     mtc0    $k0, $14 /* epc */
 
-    addiu   $sp, 88
+    lw      $sp, IFRAME_SP($sp)
     .set    pop
 .endm
 
+#ifdef WITH_LIB_UTHREAD
+#include <arch/mips/mmu.h>
+#include <arch/uthread_mmu.h>
+
+.macro get_kernel_sp ksp
+    lui     \ksp, %hi(kernel_sp)
+    lw      \ksp, %lo(kernel_sp)(\ksp)
+.endm
+
+.macro get_user_pgd pgd
+    lui     \pgd, %hi(user_pgd)
+    lw      \pgd, %lo(user_pgd)(\pgd)
+.endm
+#endif
+
+.macro set_and_save_sp
+#ifdef WITH_LIB_UTHREAD
+    .set    push
+    .set    noat
+    mfc0    $k0, $12 /* status */
+    ext     $k1, $k0, 3, 2
+    .set    noreorder
+    beqz    $k1, 1f /* 0 = kernel mode */
+      move  $k0, $sp
+    .set    reorder
+    get_kernel_sp $k0
+1:
+    sw      $sp, (-IFRAME_SIZE+IFRAME_SP)($k0) /* save user sp in kernel_sp frame */
+    move    $sp, $k0 /* switch to kernel_sp */
+    .set    pop
+#else
+    sw      $sp, (-IFRAME_SIZE+IFRAME_SP)($sp)
+#endif
+.endm
+
+.macro invalid_uaddr uaddr, ret
+	.set push
+	.set noat
+	# invalid user address if (mask & uaddr) != 0
+	li	\ret, MAX_USR_VA_MASK
+	and	\ret, \ret, \uaddr
+	.set pop
+.endm
+
+.section ".text.vectab"
+FUNCTION(vectab)
+
+.org 0
+LOCAL_FUNCTION(_tlb_refill)
+#ifdef WITH_LIB_UTHREAD
+    .set    push
+    .set    noreorder
+    .set    noat
+    mfc0    $k0, $8 /* badvaddr */
+    invalid_uaddr $k0 $k1
+    bnez    $k1, 1f
+    srl     $k0, $k0, MMU_L1_INDEX
+    andi    $k0, $k0, MMU_L1_INDEX_MASK
+    sll     $k0, $k0, 2 /* size of L1 entry */
+    get_user_pgd $k1
+    addu    $k1, $k1, $k0
+    lw      $k1, 0($k1) /* load pte pointer */
+    beqz    $k1, 1f /* do slow path if NULL pte */
+    mfc0    $k0, $4 /* context */
+    srl     $k0, $k0, ((PAGE_SIZE_SHIFT - SHIFT_4K) + 1) /* scale context.badvpn2 alignment for 8 byte L2 entry pair */
+    andi    $k0, $k0, ((MMU_L2_INDEX_MASK >> 1) << 3) /* context.badvpn2 field ignores low L2 index bit */
+    addu    $k1, $k1, $k0
+    lw      $k0, 0($k1)
+    lw      $k1, 4($k1)
+    rotr    $k0, $k0, TLB_ENTRYLO_RIXI_ROTR
+    mtc0    $k0, $2 /* entrylo0 */
+    rotr    $k1, $k1, TLB_ENTRYLO_RIXI_ROTR
+    mtc0    $k1, $3 /* entrylo1 */
+    .set    at=$k1
+    li      $k0, ((PAGE_SIZE - PAGE_SIZE_4K) << 1) /* set ignored virtual addr bits */
+    .set    noat
+    mtc0    $k0, $5 /* pagemask */
+    ehb
+    tlbwr
+    eret
+     nop
+1:
+    b       _irq
+    .set    pop
+#else /* !WITH_LIB_UTHREAD */
+    b       _irq
+#endif
+
 /* compatibility mode irq/syscall/general exception */
 .org 0x180
-_irq:
+LOCAL_FUNCTION(_irq)
+    set_and_save_sp
     la      $k0, mips_gen_exception
     li      $k1, 0
     b       shared_irq_save_return
 
+#if !WITH_MIPS_IRQCOMPAT_MODE
 /* vectored base */
 .macro vectored_irq, num
 .org 0x200 + VECTORED_OFFSET_SHIFT * \num
 _vectored_irq\num:
+    set_and_save_sp
     la      $k0, mips_irq
     li      $k1, \num
     b       shared_irq_save_return
@@ -130,11 +226,16 @@ vectored_irq 6
 vectored_irq 7
 vectored_irq 8
 vectored_irq 9
+#endif /* !WITH_MIPS_IRQCOMPAT_MODE */
 
 /* branched to from above, k0 holds address to call, k1 holds arg to function */
 shared_irq_save_return:
     iframe_save
 
+    mfc0    $t0, $12 /* status */
+    ins     $t0, $zero, 0, 5   # set kernel mode. clear IE, EXL, ERL, KSU
+    mtc0    $t0, $12 /* status */
+    ehb
     move    $a0, $sp
     move    $a1, $k1
     jal     $k0
@@ -142,4 +243,3 @@ shared_irq_save_return:
     iframe_restore
 
     eret
-

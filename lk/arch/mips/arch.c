@@ -25,6 +25,7 @@
 #include <stdint.h>
 #include <bits.h>
 #include <arch/mips.h>
+#include <arch/tlb.h>
 #include <platform.h>
 
 #define LOCAL_TRACE 0
@@ -58,6 +59,11 @@ void arch_early_init(void)
     /* make sure we take exceptions in 32bit mips mode */
     mips_write_c0_config3(mips_read_c0_config3() & ~(1<<16));
 
+#if WITH_MIPS_IRQCOMPAT_MODE
+    temp = mips_read_c0_cause();
+    temp &= ~(1<<23); /* clear IV vectored mode */
+    mips_write_c0_cause(temp);
+#else
     /* set vectored mode */
     temp = mips_read_c0_intctl();
     temp &= ~(0b1111 << 5);
@@ -69,6 +75,10 @@ void arch_early_init(void)
     temp = mips_read_c0_cause();
     temp |= (1<<23); /* IV vectored mode */
     mips_write_c0_cause(temp);
+#endif
+
+    mips_tlb_init();
+    arch_enable_cache(0);
 }
 
 void arch_init(void)
@@ -96,7 +106,9 @@ void arch_init(void)
     printf("\tcount   0x%x\n", mips_read_c0_count());
     printf("\tcompare 0x%x\n", mips_read_c0_compare());
 
+#ifndef WITH_LIB_SYSCALL
     __asm__ volatile("syscall");
+#endif
 
     LTRACE_EXIT;
 }
@@ -132,12 +144,3 @@ void mips_disable_irq(uint num)
     }
     mips_write_c0_status(temp);
 }
-
-/* unimplemented cache operations */
-void arch_disable_cache(uint flags) { PANIC_UNIMPLEMENTED; }
-void arch_enable_cache(uint flags) { PANIC_UNIMPLEMENTED; }
-
-void arch_clean_cache_range(addr_t start, size_t len) { PANIC_UNIMPLEMENTED; }
-void arch_clean_invalidate_cache_range(addr_t start, size_t len) { PANIC_UNIMPLEMENTED; }
-void arch_invalidate_cache_range(addr_t start, size_t len) { PANIC_UNIMPLEMENTED; }
-void arch_sync_cache_range(addr_t start, size_t len) { PANIC_UNIMPLEMENTED; }

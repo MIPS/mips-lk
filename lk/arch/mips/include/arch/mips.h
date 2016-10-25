@@ -22,10 +22,21 @@
  */
 #pragma once
 
+#define IFRAME_SIZE (104)
+#define IFRAME_SP   (72)
+
+#define VECTORED_OFFSET_SHIFT 32
+
 #ifndef ASSEMBLY
 #include <compiler.h>
 #include <stdint.h>
 #include <sys/types.h>
+
+#define SYNC __asm__ volatile("sync" ::: "memory")
+
+/* coprocessor 0 cause register bitfield definition */
+#define CAUSEB_IP0 8
+#define CAUSEB_IP7 15
 
 #define GEN_CP_REG_FUNCS(regname, regnum, sel) \
 static inline __ALWAYS_INLINE uint32_t mips_read_##regname(void) { \
@@ -48,7 +59,16 @@ static inline __ALWAYS_INLINE void mips_write_##regname##_relaxed(uint32_t val) 
     __asm__ volatile("mtc0 %0, $" #regnum ", " #sel :: "r" (val)); \
 }
 
+GEN_CP_REG_FUNCS(c0_entrylo0, 2, 0)
+GEN_CP_REG_FUNCS(c0_entrylo1, 3, 0)
+GEN_CP_REG_FUNCS(c0_context, 4, 0)
+GEN_CP_REG_FUNCS(c0_pagemask, 5, 0)
+GEN_CP_REG_FUNCS(c0_pagegrain, 5, 1)
+GEN_CP_REG_FUNCS(c0_badvaddr, 8, 0)
+GEN_CP_REG_FUNCS(c0_badinstr, 8, 1)
+GEN_CP_REG_FUNCS(c0_badinstrp, 8, 2)
 GEN_CP_REG_FUNCS(c0_count, 9, 0)
+GEN_CP_REG_FUNCS(c0_entryhi, 10, 0)
 GEN_CP_REG_FUNCS(c0_compare, 11, 0)
 GEN_CP_REG_FUNCS(c0_status, 12, 0)
 GEN_CP_REG_FUNCS(c0_intctl, 12, 1)
@@ -90,12 +110,18 @@ struct mips_iframe {
     uint32_t t8;
     uint32_t t9;
     uint32_t gp;
+    uint32_t sp;
     uint32_t ra;
+    uint32_t hi;
+    uint32_t lo;
     uint32_t status;
+    uint32_t badvaddr;
     uint32_t cause;
     uint32_t epc;
 };
-STATIC_ASSERT(sizeof(struct mips_iframe) == 88);
+STATIC_ASSERT(sizeof(struct mips_iframe) == IFRAME_SIZE);
+STATIC_ASSERT((IFRAME_SIZE % 8) == 0);
+STATIC_ASSERT(offsetof(struct mips_iframe, sp) == IFRAME_SP);
 
 void mips_init_timer(uint32_t freq);
 enum handler_return mips_timer_irq(void);
@@ -104,6 +130,3 @@ void mips_enable_irq(uint num);
 void mips_disable_irq(uint num);
 
 #endif // !ASSEMBLY
-
-#define VECTORED_OFFSET_SHIFT 32
-

@@ -57,11 +57,14 @@ void arch_thread_initialize(thread_t *t)
 {
     LTRACEF("t %p (%s)\n", t, t->name);
 
+    // make sure the top of the stack is 8 byte aligned for EABI compliance
+    vaddr_t stack_top = ROUNDDOWN((vaddr_t)t->stack + t->stack_size, 8);
+
     /* zero out the thread context */
     memset(&t->arch.cs_frame, 0, sizeof(t->arch.cs_frame));
 
     t->arch.cs_frame.ra = (vaddr_t)&initial_thread_func;
-    t->arch.cs_frame.sp = (vaddr_t)t->stack + t->stack_size;
+    t->arch.cs_frame.sp = stack_top;
 }
 
 void arch_context_switch(thread_t *oldthread, thread_t *newthread)

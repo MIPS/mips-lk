@@ -1,21 +1,37 @@
 OUTPUT_FORMAT("elf32-tradlittlemips", "elf32-tradbigmips",
           "elf32-tradlittlemips")
-/*OUTPUT_FORMAT("elf32-bigmips", "elf32-bigmips", "elf32-littlemips")*/
 OUTPUT_ARCH(mips)
 
 ENTRY(_start)
+
+PHDRS {
+    exc PT_LOAD;
+    text PT_LOAD;
+}
+
 SECTIONS
 {
+    . = %KERNEL_BASE%;
+
+    /*
+     * QEMU mips malta reserves 4KB @ 0x2000 for prom environment ptr
+     * IASim boot-cps reserves 32B @ 0xf00 for cpu_launch
+     */
+    .text.vectab : AT(%KERNEL_BASE%) {
+        KEEP(*(.text.vectab))
+    } : exc
+
     . = %KERNEL_BASE% + %KERNEL_LOAD_OFFSET%;
 
     /* text/read-only data */
-    .text : {
-        KEEP(*(.text.vectab))
+    .text : AT(%KERNEL_BASE% + %KERNEL_LOAD_OFFSET%) {
         KEEP(*(.text.boot))
         *(.text* .gnu.linkonce.t.*)
-    }
+    } : text
 
     .interp : { *(.interp) }
+    .MIPS.abiflags : { *(.MIPS.abiflags) }
+    .reginfo : { *(.reginfo) }
     .hash : { *(.hash) }
     .dynsym : { *(.dynsym) }
     .dynstr : { *(.dynstr) }
@@ -117,7 +133,7 @@ SECTIONS
         _sbss_end__ = .;
     }
 
-    /* uninitialized data (in same segment as writable data) */
+    /* unintialized data (in same segment as writable data) */
     .bss : {
         /* regular bss */
         *(.dynbss)
