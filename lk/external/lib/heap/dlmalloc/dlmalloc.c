@@ -556,6 +556,9 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #define MALLOC_FAILURE_ACTION // dprintf(INFO, "dlmalloc failure\n");
 #define MALLOC_INSPECT_ALL 1
 #define REALLOC_ZERO_BYTES_FREES 1
+#ifndef PAGESIZE
+#define PAGESIZE PAGE_SIZE
+#endif
 #endif  /* LK */
 
 #ifndef WIN32
