@@ -21,6 +21,6 @@ GLOBAL_DEFINES += HEAP_GROW_SIZE=65536
 MODULES += \
 	lib/trusty \
 
-TRUSTY_USER_ARCH := mips
+TRUSTY_USER_ARCH := $(ARCH)
 
 EXTRA_BUILDRULES += app/trusty/user-tasks.mk

@@ -46,6 +46,19 @@
 #define __NR_put_msg		0x22
 #define __NR_send_msg		0x23
 #define __NR_set_panic_handler	0x24
+#define __NR_check_access_rights	0x30
+#define __NR_connect_to_ta		0x31
+#define __NR_get_ta_props_cnt		0x32
+#define __NR_get_implementation_props	0x33
+#define __NR_get_ta_client_props	0x34
+#define __NR_get_props_num		0x35
+#define __NR_mmap_memref		0x36
+#define __NR_munmap_memref		0x37
+#define __NR_ta_dead			0x38
+#define __NR_ta_next_msg		0x39
+#define __NR_open_session		0x3a
+#define __NR_invoke_command		0x3b
+#define __NR_close_session		0x3c
 
 #ifndef ASSEMBLY
 
@@ -74,6 +87,19 @@ long read_msg (uint32_t handle, uint32_t msg_id, uint32_t offset, ipc_msg_t *msg
 long put_msg (uint32_t handle, uint32_t msg_id);
 long send_msg (uint32_t handle, ipc_msg_t *msg);
 long set_panic_handler (void (*pa_handler)(void*), void *args);
+long check_access_rights (unsigned long flags, const void *buf, size_t len);
+long connect_to_ta (const uuid_t *dest_uuid);
+long get_ta_props_cnt (const uuid_t *dest_uuid, uint32_t *config_entry_cnt);
+long get_implementation_props(const char *prop_name, void *prop, uint32_t index);
+long get_ta_client_props(const uuid_t *uuid, const char *prop_name, void *prop, uint32_t index);
+long get_props_num(const uuid_t *uuid, const uint32_t prop_set, uint32_t *prop_length);
+long mmap_memref (void* uaddr, uint32_t size, uint32_t flags, uint32_t handle);
+long munmap_memref (void* uaddr, uint32_t size);
+long ta_dead (void);
+long ta_next_msg (uevent_t *event, uuid_t *peer_uuid);
+long open_session (uint32_t *session, void *utee_params, uint32_t *ret_orig, uint32_t *uint_args);
+long invoke_command (uint32_t session, void *utee_params, uint32_t *ret_orig, uint32_t *uint_args);
+long close_session (uint32_t session);
 
 __END_CDECLS
 

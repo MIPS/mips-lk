@@ -56,3 +56,18 @@ DEF_SYSCALL(0x22, put_msg, long, 2, uint32_t handle, uint32_t msg_id)
 DEF_SYSCALL(0x23, send_msg, long, 2, uint32_t handle, ipc_msg_t *msg)
 
 DEF_SYSCALL(0x24, set_panic_handler, long, 2, void (*pa_handler)(void*), void *args)
+
+/* Trusted Execution Environment API syscalls */
+DEF_SYSCALL(0x30, check_access_rights, long, 3, unsigned long flags, const void *buf, size_t len)
+DEF_SYSCALL(0x31, connect_to_ta, long, 1, const uuid_t *dest_uuid)
+DEF_SYSCALL(0x32, get_ta_props_cnt, long, 2, const uuid_t *dest_uuid, uint32_t *config_entry_cnt)
+DEF_SYSCALL(0x33, get_implementation_props, long, 3, const char *prop_name, void *prop, uint32_t index)
+DEF_SYSCALL(0x34, get_ta_client_props, long, 3, const uuid_t *uuid, const char *prop_name, void *prop, uint32_t index)
+DEF_SYSCALL(0x35, get_props_num, long, 3, const uuid_t *uuid, uint32_t prop_set, uint32_t *prop_length)
+DEF_SYSCALL(0x36, mmap_memref, long, 4, user_addr_t uaddr, uint32_t size, uint32_t flags, uint32_t handle)
+DEF_SYSCALL(0x37, munmap_memref, long, 2, user_addr_t uaddr, uint32_t size)
+DEF_SYSCALL(0x38, ta_dead, long, 0)
+DEF_SYSCALL(0x39, ta_next_msg, long, 2, user_addr_t user_event, user_addr_t peer_uuid)
+DEF_SYSCALL(0x3a, open_session, long, 4, uint32_t *session, void *utee_params, uint32_t *ret_orig, uint32_t *uint_args)
+DEF_SYSCALL(0x3b, invoke_command, long, 4, uint32_t session, void *utee_params, uint32_t *ret_orig, uint32_t *uint_args)
+DEF_SYSCALL(0x3c, close_session, long, 1, uint32_t session)

@@ -8,6 +8,7 @@ OUTPUT_FORMAT("elf32-tradlittlemips", "elf32-tradbigmips",
 OUTPUT_ARCH(mips)
 
 EXTERN(trusty_app_manifest)
+EXTERN(tee_api_properties)
 
 ENTRY(_start)
 

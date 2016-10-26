@@ -1,0 +1,34 @@
+LOCAL_DIR := $(GET_LOCAL_DIR)
+
+include project/virtual/trusty.mk
+
+WITH_GP_API := 1
+WITH_TRUSTY_IPC := 1
+WITH_KERNEL_VM := 1
+
+GLOBAL_DEFINES += APIVERSION=\"1.1\"
+GLOBAL_DEFINES += DESCRIPTION=\"123\"
+GLOBAL_DEFINES += TEE_VERSION=\"0.0\"
+GLOBAL_DEFINES += MANUFACTURER=\"IMGTec\"
+GLOBAL_DEFINES += BIGINTSIZE=32
+
+UTHREAD_WITH_MEMORY_MAPPING_SUPPORT := 1
+GLOBAL_DEFINES += \
+    UTHREAD_WITH_MEMORY_MAPPING_SUPPORT=$(UTHREAD_WITH_MEMORY_MAPPING_SUPPORT)
+
+#
+# Modules to be compiled into lk.bin
+#
+MODULES += \
+	lib/tee \
+
+#
+# user tasks to be compiled into lk.bin
+#
+
+# prebuilt
+TRUSTY_PREBUILT_USER_TASKS +=
+
+# compiled from source
+TRUSTY_ALL_USER_TASKS += \
+	tee/sess_mngr \

@@ -186,3 +186,94 @@ FUNCTION(set_panic_handler)
     syscall
     j       $ra
       nop
+
+.section .text.check_access_rights
+FUNCTION(check_access_rights)
+    li      $v0, __NR_check_access_rights
+    syscall
+    j       $ra
+      nop
+
+.section .text.connect_to_ta
+FUNCTION(connect_to_ta)
+    li      $v0, __NR_connect_to_ta
+    syscall
+    j       $ra
+      nop
+
+.section .text.get_ta_props_cnt
+FUNCTION(get_ta_props_cnt)
+    li      $v0, __NR_get_ta_props_cnt
+    syscall
+    j       $ra
+      nop
+
+.section .text.get_implementation_props
+FUNCTION(get_implementation_props)
+    li      $v0, __NR_get_implementation_props
+    syscall
+    j       $ra
+      nop
+
+.section .text.get_ta_client_props
+FUNCTION(get_ta_client_props)
+    li      $v0, __NR_get_ta_client_props
+    syscall
+    j       $ra
+      nop
+
+.section .text.get_props_num
+FUNCTION(get_props_num)
+    li      $v0, __NR_get_props_num
+    syscall
+    j       $ra
+      nop
+
+.section .text.mmap_memref
+FUNCTION(mmap_memref)
+    li      $v0, __NR_mmap_memref
+    syscall
+    j       $ra
+      nop
+
+.section .text.munmap_memref
+FUNCTION(munmap_memref)
+    li      $v0, __NR_munmap_memref
+    syscall
+    j       $ra
+      nop
+
+.section .text.ta_dead
+FUNCTION(ta_dead)
+    li      $v0, __NR_ta_dead
+    syscall
+    j       $ra
+      nop
+
+.section .text.ta_next_msg
+FUNCTION(ta_next_msg)
+    li      $v0, __NR_ta_next_msg
+    syscall
+    j       $ra
+      nop
+
+.section .text.open_session
+FUNCTION(open_session)
+    li      $v0, __NR_open_session
+    syscall
+    j       $ra
+      nop
+
+.section .text.invoke_command
+FUNCTION(invoke_command)
+    li      $v0, __NR_invoke_command
+    syscall
+    j       $ra
+      nop
+
+.section .text.close_session
+FUNCTION(close_session)
+    li      $v0, __NR_close_session
+    syscall
+    j       $ra
+      nop

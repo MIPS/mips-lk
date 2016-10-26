@@ -34,6 +34,8 @@
  * physically contiguous, read-writable and 4k aligned) for now.
  */
 #define MMAP_FLAG_IO_HANDLE		(0x1 << 0)
+#define MMAP_FLAG_PROT_READ		(0x1 << 1)
+#define MMAP_FLAG_PROT_WRITE		(0x1 << 2)
 
 /**
  * struct dma_pmem - a contiguous physical memory block
