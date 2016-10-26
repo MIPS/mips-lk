@@ -582,6 +582,7 @@ typedef struct data_cb_ctx {
 
 static int tx_data_cb(uint8_t *buf, size_t buf_len, void *ctx)
 {
+	int rc;
 	data_cb_ctx_t *cb_ctx = (data_cb_ctx_t *) ctx;
 
 	DEBUG_ASSERT(buf);
@@ -596,8 +597,12 @@ static int tx_data_cb(uint8_t *buf, size_t buf_len, void *ctx)
 	};
 
 	/* read data */
-	return ipc_read_msg(cb_ctx->chan, cb_ctx->msg_inf.id, 0,
-	                    &dst_kern_msg);
+	rc = ipc_read_msg(cb_ctx->chan, cb_ctx->msg_inf.id, 0,
+		          &dst_kern_msg);
+
+	/* retire msg */
+	ipc_put_msg(cb_ctx->chan, cb_ctx->msg_inf.id);
+	return rc;
 }
 
 static void handle_tx_msg(struct tipc_dev *dev, handle_t *chan)
@@ -642,9 +647,6 @@ static void handle_tx_msg(struct tipc_dev *dev, handle_t *chan)
 			/* nothing we can do about it: log it */
 			TRACEF("tipc_send_data failed (%d)\n", ret);
 		}
-
-		/* retire msg */
-		ipc_put_msg(chan, cb_ctx.msg_inf.id);
 	}
 }
 
