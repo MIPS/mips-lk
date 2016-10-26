@@ -1,0 +1,63 @@
+MIPS-LK TEE description
+=======================
+
+MIPS-LK TEE project is still work in progress.
+
+The main objective of the project is to provide TEE functionality according to
+the Global Platform specification. The project is expanded upon LK and Trusty
+projects.
+
+
+MIPS-LK TEE Components
+======================
+
+- Session Manager
+- libutee
+- Trusty TEE syscalls
+
+
+Communication workflow description
+==================================
+
+Standard TEE communication is based on client's requesting an operation from the
+trusted application and trusted application sending back a response. Client's
+requests are made through GP Client API or Internal Client API, depending if the
+client application is part of REE or TEE. At this point of implementation, with
+the absence of REE, client applications are special cases of trusted
+applications, using the Internal Client API implemented in libutee.
+The libutee library uses Trusty TEE syscalls, implemented in trusty/lib/tee to
+communicate with the session manager.
+Session manager is a privileged trusted application responsible for all the
+communication between client and trusted applications and it keeps all needed
+session related information.
+Trusted applications are linked with libutee and communicate with session
+manager through GP API's TA interface and Trusty-TEE syscalls.
+All the communication is based on Trusty IPC API.
+
+
+Trusted Application description
+===============================
+
+MIPS-LK TEE trusted application requires:
+
+- manifest.c file defining TA's UUID and basic properties
+- *.c file implementing the entry point functions
+- rules.mk file defining the build rules
+
+For some examples, see app/tee_unittest/ta
+
+
+Supported Global Platform APIs
+==============================
+
+TEE Internal Core APIs supported in this version:
+
+- Trusted Core Framework API
+    -- TA Interface
+    -- Property Access Functions
+    -- Panics
+    -- Internal Client API
+    -- Memory Management Functions
+- Time API
+
+For testing purposes, please refer to app/tee_unittest/README file.
