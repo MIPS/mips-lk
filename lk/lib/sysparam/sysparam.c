@@ -514,6 +514,7 @@ static ssize_t hexstr_to_val(const char *str, uint8_t **buf)
         uint8_t c = str[pos];
 
         if (!isxdigit(c)) {
+            free(hexbuffer);
             return ERR_NOT_VALID;
         }
 
@@ -674,6 +675,7 @@ usage:
         len = sysparam_read(argv[2].str, buf, len);
         if (len < 0) {
             err = len;
+            free(buf);
             goto done;
         }
         err = NO_ERROR;

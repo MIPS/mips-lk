@@ -213,7 +213,7 @@ thread_t *thread_create_etc(thread_t *t, const char *name, thread_start_routine 
     }
 #if THREAD_STACK_HIGHWATER
     if (flags & THREAD_FLAG_DEBUG_STACK_BOUNDS_CHECK) {
-        memset(t->stack + THREAD_STACK_PADDING_SIZE, STACK_DEBUG_BYTE,
+        memset((uint8_t *)t->stack + THREAD_STACK_PADDING_SIZE, STACK_DEBUG_BYTE,
                stack_size - THREAD_STACK_PADDING_SIZE);
     } else {
         memset(t->stack, STACK_DEBUG_BYTE, stack_size);

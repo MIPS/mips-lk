@@ -397,7 +397,7 @@ status_t vmm_alloc_physical(vmm_aspace_t *aspace, const char *name, size_t size,
         *ptr = (void *)r->base;
 
     /* map all of the pages */
-    int err = arch_mmu_map(&aspace->arch_aspace, r->base, paddr, size / PAGE_SIZE, arch_mmu_flags);
+    __UNUSED int err = arch_mmu_map(&aspace->arch_aspace, r->base, paddr, size / PAGE_SIZE, arch_mmu_flags);
     LTRACEF("arch_mmu_map returns %d\n", err);
 
     ret = NO_ERROR;
@@ -803,11 +803,11 @@ usage:
         status_t err = vmm_free_region(test_aspace, (vaddr_t)argv[2].u);
         printf("vmm_free_region returns %d\n", err);
     } else if (!strcmp(argv[1].str, "create_aspace")) {
-        vmm_aspace_t *aspace;
+        vmm_aspace_t *aspace = NULL;
         status_t err = vmm_create_aspace(&aspace, "test", 0);
         printf("vmm_create_aspace returns %d, aspace %p\n", err, aspace);
     } else if (!strcmp(argv[1].str, "create_test_aspace")) {
-        vmm_aspace_t *aspace;
+        vmm_aspace_t *aspace = NULL;
         status_t err = vmm_create_aspace(&aspace, "test", 0);
         printf("vmm_create_aspace returns %d, aspace %p\n", err, aspace);
         if (err < 0)

@@ -39,7 +39,7 @@ void *context1 = (void *) 0x53;
 
 static void dump_port_result(const port_result_t *result)
 {
-    const port_packet_t *p = &result->packet;
+    __UNUSED const port_packet_t *p = &result->packet;
     LTRACEF("[%02x %02x %02x %02x %02x %02x %02x %02x]\n",
             p->value[0], p->value[1], p->value[2], p->value[3],
             p->value[4], p->value[5], p->value[6], p->value[7]);

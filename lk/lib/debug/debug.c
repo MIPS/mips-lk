@@ -24,7 +24,6 @@
 #include <ctype.h>
 #include <debug.h>
 #include <stdlib.h>
-#include <printf.h>
 #include <stdio.h>
 #include <list.h>
 #include <arch/ops.h>
