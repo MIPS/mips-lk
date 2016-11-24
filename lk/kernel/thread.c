@@ -35,7 +35,7 @@
 #include <list.h>
 #include <malloc.h>
 #include <string.h>
-#include <printf.h>
+#include <stdio.h>
 #include <err.h>
 #include <lib/dpc.h>
 #include <kernel/thread.h>
@@ -395,7 +395,12 @@ status_t thread_detach(thread_t *t)
     if (t->state == THREAD_DEATH) {
         t->flags &= ~THREAD_FLAG_DETACHED; /* makes sure thread_join continues */
         THREAD_UNLOCK(state);
-        return thread_join(t, NULL, 0);
+        status_t err = thread_join(t, NULL, 0);
+        if (err == NO_ERROR) {
+            /* thread_t was free'd and must not be accessed again */
+            return ERR_OBJECT_DESTROYED;
+        }
+        return err;
     } else {
         t->flags |= THREAD_FLAG_DETACHED;
         THREAD_UNLOCK(state);
