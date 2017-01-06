@@ -119,7 +119,7 @@ err:
 /**
  * @brief  Release mutex
  */
-status_t mutex_release(mutex_t *m)
+status_t mutex_release_reschedule(mutex_t *m, bool reschedule)
 {
     DEBUG_ASSERT(m->magic == MUTEX_MAGIC);
 
@@ -136,7 +136,7 @@ status_t mutex_release(mutex_t *m)
 
     if (unlikely(--m->count >= 1)) {
         /* release a thread */
-        wait_queue_wake_one(&m->wait, true, NO_ERROR);
+        wait_queue_wake_one(&m->wait, reschedule, NO_ERROR);
     }
 
     THREAD_UNLOCK(state);

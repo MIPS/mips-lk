@@ -56,7 +56,12 @@ typedef struct mutex {
 void mutex_init(mutex_t *);
 void mutex_destroy(mutex_t *);
 status_t mutex_acquire_timeout(mutex_t *, lk_time_t); /* try to acquire the mutex with a timeout value */
-status_t mutex_release(mutex_t *);
+status_t mutex_release_reschedule(mutex_t *, bool);
+
+static inline status_t mutex_release(mutex_t *m)
+{
+    return mutex_release_reschedule(m, true);
+}
 
 static inline status_t mutex_acquire(mutex_t *m)
 {
