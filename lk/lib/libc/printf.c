@@ -459,6 +459,11 @@ next_format:
             case '.':
                 /* XXX for now eat numeric formatting */
                 goto next_format;
+            case '*':
+                /* XXX dynamic width formatting not supported, skip it */
+                n = va_arg(ap, int);
+                (void)n; /* suppress warning: 'n' is never read */
+                goto next_format;
             case '%':
                 OUTPUT_CHAR('%');
                 break;
