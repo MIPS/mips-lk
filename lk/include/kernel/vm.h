@@ -115,7 +115,7 @@ STATIC_ASSERT(USER_ASPACE_BASE + (USER_ASPACE_SIZE - 1) > USER_ASPACE_BASE);
 
 static inline bool is_user_address(vaddr_t va)
 {
-    return (va >= USER_ASPACE_BASE && va <= (USER_ASPACE_BASE + (USER_ASPACE_SIZE - 1)));
+    return (va - USER_ASPACE_BASE) <= (USER_ASPACE_SIZE - 1);
 }
 
 /* physical allocator */
