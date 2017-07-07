@@ -55,11 +55,20 @@ struct virtio_device {
     struct vring ring[MAX_VIRTIO_RINGS];
 };
 
+int virtio_mmio_alloc_devices(uint count);
+/* adds one virtio device */
+int virtio_mmio_setup_device(uint idx, void *ptr, uint irq);
+
 void virtio_reset_device(struct virtio_device *dev);
 void virtio_status_acknowledge_driver(struct virtio_device *dev);
+uint32_t virtio_get_host_feature(struct virtio_device *dev, uint32_t index);
+void virtio_set_guest_feature(struct virtio_device *dev, uint32_t index,
+                              uint32_t value);
+status_t virtio_status_acknowledge_features(struct virtio_device *dev);
 void virtio_status_driver_ok(struct virtio_device *dev);
 
 /* api used by devices to interact with the virtio bus */
+uint virtio_mmio_max_queue_size(struct virtio_device *dev, uint index);
 status_t virtio_alloc_ring(struct virtio_device *dev, uint index, uint16_t len) __NONNULL();
 
 /* add a descriptor at index desc_index to the free list on ring_index */

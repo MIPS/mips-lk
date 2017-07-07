@@ -39,6 +39,9 @@
 
 #include "virtio_priv.h"
 
+#if WITH_DEV_VIRTIO_CONSOLE
+#include <dev/virtio/console.h>
+#endif
 #if WITH_DEV_VIRTIO_BLOCK
 #include <dev/virtio/block.h>
 #endif
@@ -47,6 +50,10 @@
 #endif
 #if WITH_DEV_VIRTIO_GPU
 #include <dev/virtio/gpu.h>
+#endif
+
+#ifndef VIRTIO_MMIO_SPACING
+#define VIRTIO_MMIO_SPACING 0x200
 #endif
 
 #define LOCAL_TRACE 0
@@ -127,113 +134,155 @@ static enum handler_return virtio_mmio_irq(void *arg)
     return ret;
 }
 
+int virtio_mmio_setup_device(uint idx, void *ptr, uint irq)
+{
+    volatile struct virtio_mmio_config *mmio = (struct virtio_mmio_config *) ptr;
+    struct virtio_device *dev = &devices[idx];
+    dev->index = idx;
+    dev->irq = irq;
+
+    LTRACEF("looking at magic 0x%x version 0x%x did 0x%x vid 0x%x\n",
+            mmio->magic, mmio->version, mmio->device_id, mmio->vendor_id);
+
+    if (mmio->magic != VIRTIO_MMIO_MAGIC) {
+        return ERR_NOT_VALID;
+    }
+
+    mask_interrupt(irq);
+    register_int_handler(irq, &virtio_mmio_irq, (void *)dev);
+
+#if LOCAL_TRACE
+    if (mmio->device_id != 0) {
+        dump_mmio_config(mmio);
+    }
+#endif
+
+#if WITH_DEV_VIRTIO_CONSOLE
+    if (mmio->device_id == 3) { // console device
+        LTRACEF("found virtio console device\n");
+
+        dev->mmio_config = mmio;
+        dev->config_ptr = (void *)mmio->config;
+
+        status_t err = virtio_console_init(dev, mmio->host_features);
+        if (err >= 0) {
+            // good device
+            dev->valid = true;
+
+            if (dev->irq_driver_callback)
+                unmask_interrupt(dev->irq);
+        }
+
+        return err;
+    }
+#endif
+#if WITH_DEV_VIRTIO_BLOCK
+    if (mmio->device_id == 2) { // block device
+        LTRACEF("found block device\n");
+
+        dev->mmio_config = mmio;
+        dev->config_ptr = (void *)mmio->config;
+
+        status_t err = virtio_block_init(dev, mmio->host_features);
+        if (err >= 0) {
+            // good device
+            dev->valid = true;
+
+            if (dev->irq_driver_callback)
+                unmask_interrupt(dev->irq);
+
+            // XXX quick test code, remove
+#if 0
+            uint8_t buf[512];
+            memset(buf, 0x99, sizeof(buf));
+            virtio_block_read_write(dev, buf, 0, sizeof(buf), false);
+            hexdump8_ex(buf, sizeof(buf), 0);
+
+            buf[0]++;
+            virtio_block_read_write(dev, buf, 0, sizeof(buf), true);
+
+            virtio_block_read_write(dev, buf, 0, sizeof(buf), false);
+            hexdump8_ex(buf, sizeof(buf), 0);
+#endif
+        }
+
+        return err;
+
+    }
+#endif // WITH_DEV_VIRTIO_BLOCK
+#if WITH_DEV_VIRTIO_NET
+    if (mmio->device_id == 1) { // network device
+        LTRACEF("found net device\n");
+
+        dev->mmio_config = mmio;
+        dev->config_ptr = (void *)mmio->config;
+
+        status_t err = virtio_net_init(dev, mmio->host_features);
+        if (err >= 0) {
+            // good device
+            dev->valid = true;
+
+            if (dev->irq_driver_callback)
+                unmask_interrupt(dev->irq);
+        }
+
+        return err;
+    }
+#endif // WITH_DEV_VIRTIO_NET
+#if WITH_DEV_VIRTIO_GPU
+    if (mmio->device_id == 0x10) { // virtio-gpu
+        LTRACEF("found gpu device\n");
+
+        dev->mmio_config = mmio;
+        dev->config_ptr = (void *)mmio->config;
+
+        status_t err = virtio_gpu_init(dev, mmio->host_features);
+        if (err >= 0) {
+            // good device
+            dev->valid = true;
+
+            if (dev->irq_driver_callback)
+                unmask_interrupt(dev->irq);
+
+            virtio_gpu_start(dev);
+        }
+
+        return err;
+    }
+#endif // WITH_DEV_VIRTIO_GPU
+
+    return ERR_NOT_SUPPORTED;
+}
+
+int virtio_mmio_alloc_devices(uint count)
+{
+    DEBUG_ASSERT(!devices);
+
+    devices = calloc(count, sizeof(struct virtio_device));
+
+    if (!devices)
+      return ERR_NO_MEMORY;
+
+    return 0;
+}
+
 int virtio_mmio_detect(void *ptr, uint count, const uint irqs[])
 {
     LTRACEF("ptr %p, count %u\n", ptr, count);
 
     DEBUG_ASSERT(ptr);
     DEBUG_ASSERT(irqs);
-    DEBUG_ASSERT(!devices);
 
     /* allocate an array big enough to hold a list of devices */
-    devices = calloc(count, sizeof(struct virtio_device));
-    if (!devices)
-        return ERR_NO_MEMORY;
+    int err = virtio_mmio_alloc_devices(count);
+    if (err < 0)
+        return err;
 
     int found = 0;
     for (uint i = 0; i < count; i++) {
-        volatile struct virtio_mmio_config *mmio = (struct virtio_mmio_config *)((uint8_t *)ptr + i * 0x200);
-        struct virtio_device *dev = &devices[i];
+        void *mmio = ((uint8_t *)ptr + i * VIRTIO_MMIO_SPACING);
 
-        dev->index = i;
-        dev->irq = irqs[i];
-
-        mask_interrupt(irqs[i]);
-        register_int_handler(irqs[i], &virtio_mmio_irq, (void *)dev);
-
-        LTRACEF("looking at magic 0x%x version 0x%x did 0x%x vid 0x%x\n",
-                mmio->magic, mmio->version, mmio->device_id, mmio->vendor_id);
-
-        if (mmio->magic != VIRTIO_MMIO_MAGIC) {
-            continue;
-        }
-
-#if LOCAL_TRACE
-        if (mmio->device_id != 0) {
-            dump_mmio_config(mmio);
-        }
-#endif
-
-#if WITH_DEV_VIRTIO_BLOCK
-        if (mmio->device_id == 2) { // block device
-            LTRACEF("found block device\n");
-
-            dev->mmio_config = mmio;
-            dev->config_ptr = (void *)mmio->config;
-
-            status_t err = virtio_block_init(dev, mmio->host_features);
-            if (err >= 0) {
-                // good device
-                dev->valid = true;
-
-                if (dev->irq_driver_callback)
-                    unmask_interrupt(dev->irq);
-
-                // XXX quick test code, remove
-#if 0
-                uint8_t buf[512];
-                memset(buf, 0x99, sizeof(buf));
-                virtio_block_read_write(dev, buf, 0, sizeof(buf), false);
-                hexdump8_ex(buf, sizeof(buf), 0);
-
-                buf[0]++;
-                virtio_block_read_write(dev, buf, 0, sizeof(buf), true);
-
-                virtio_block_read_write(dev, buf, 0, sizeof(buf), false);
-                hexdump8_ex(buf, sizeof(buf), 0);
-#endif
-            }
-
-        }
-#endif // WITH_DEV_VIRTIO_BLOCK
-#if WITH_DEV_VIRTIO_NET
-        if (mmio->device_id == 1) { // network device
-            LTRACEF("found net device\n");
-
-            dev->mmio_config = mmio;
-            dev->config_ptr = (void *)mmio->config;
-
-            status_t err = virtio_net_init(dev, mmio->host_features);
-            if (err >= 0) {
-                // good device
-                dev->valid = true;
-
-                if (dev->irq_driver_callback)
-                    unmask_interrupt(dev->irq);
-            }
-        }
-#endif // WITH_DEV_VIRTIO_NET
-#if WITH_DEV_VIRTIO_GPU
-        if (mmio->device_id == 0x10) { // virtio-gpu
-            LTRACEF("found gpu device\n");
-
-            dev->mmio_config = mmio;
-            dev->config_ptr = (void *)mmio->config;
-
-            status_t err = virtio_gpu_init(dev, mmio->host_features);
-            if (err >= 0) {
-                // good device
-                dev->valid = true;
-
-                if (dev->irq_driver_callback)
-                    unmask_interrupt(dev->irq);
-
-                virtio_gpu_start(dev);
-            }
-        }
-#endif // WITH_DEV_VIRTIO_GPU
-
-        if (dev->valid)
+        if (virtio_mmio_setup_device(i, mmio, irqs[i]) >= 0)
             found++;
     }
 
@@ -306,7 +355,7 @@ void virtio_submit_chain(struct virtio_device *dev, uint ring_index, uint16_t de
     struct vring_avail *avail = dev->ring[ring_index].avail;
 
     avail->ring[avail->idx & dev->ring[ring_index].num_mask] = desc_index;
-    DSB;
+    mb();
     avail->idx++;
 
 #if LOCAL_TRACE
@@ -319,7 +368,7 @@ void virtio_kick(struct virtio_device *dev, uint ring_index)
     LTRACEF("dev %p, ring %u\n", dev, ring_index);
 
     dev->mmio_config->queue_notify = ring_index;
-    DSB;
+    mb();
 }
 
 status_t virtio_alloc_ring(struct virtio_device *dev, uint index, uint16_t len)
@@ -379,16 +428,38 @@ status_t virtio_alloc_ring(struct virtio_device *dev, uint index, uint16_t len)
 
     /* register the ring with the device */
     DEBUG_ASSERT(dev->mmio_config);
-    dev->mmio_config->guest_page_size = PAGE_SIZE;
     dev->mmio_config->queue_sel = index;
     dev->mmio_config->queue_num = len;
-    dev->mmio_config->queue_align = PAGE_SIZE;
-    dev->mmio_config->queue_pfn = pa / PAGE_SIZE;
+
+    if (dev->mmio_config->version < 2) {
+        dev->mmio_config->guest_page_size = PAGE_SIZE;
+        dev->mmio_config->queue_align = PAGE_SIZE;
+        dev->mmio_config->queue_pfn = pa / PAGE_SIZE;
+    } else {
+        dev->mmio_config->queue_desc_lo = (uint32_t) pa;
+        dev->mmio_config->queue_desc_hi = (uint32_t) ((uint64_t)pa >> 32);
+        pa += ((paddr_t)ring->avail - (paddr_t)ring->desc);
+        dev->mmio_config->queue_avail_lo = (uint32_t) pa;
+        dev->mmio_config->queue_avail_hi = (uint32_t) ((uint64_t)pa >> 32);
+        pa += ((paddr_t)ring->used - (paddr_t)ring->avail);
+        dev->mmio_config->queue_used_lo = (uint32_t) pa;
+        dev->mmio_config->queue_used_hi = (uint32_t) ((uint64_t)pa >> 32);
+        dev->mmio_config->queue_ready = 1;
+    }
 
     /* mark the ring active */
     dev->active_rings_bitmap |= (1 << index);
 
     return NO_ERROR;
+}
+
+uint virtio_mmio_max_queue_size(struct virtio_device *dev, uint index)
+{
+    DEBUG_ASSERT(dev->mmio_config);
+
+    dev->mmio_config->queue_sel = index;
+
+    return dev->mmio_config->queue_num_max;
 }
 
 void virtio_reset_device(struct virtio_device *dev)
@@ -399,6 +470,32 @@ void virtio_reset_device(struct virtio_device *dev)
 void virtio_status_acknowledge_driver(struct virtio_device *dev)
 {
     dev->mmio_config->status |= VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER;
+}
+
+uint32_t virtio_get_host_feature(struct virtio_device *dev, uint32_t index)
+{
+    dev->mmio_config->host_features_sel = index;
+
+    return dev->mmio_config->host_features;
+}
+
+void virtio_set_guest_feature(struct virtio_device *dev, uint32_t index,
+                              uint32_t value)
+{
+    dev->mmio_config->guest_features_sel = index;
+    dev->mmio_config->guest_features = value;
+}
+
+int virtio_status_acknowledge_features(struct virtio_device *dev)
+{
+    if (dev->mmio_config->version >= 2) {
+        dev->mmio_config->status |= VIRTIO_STATUS_FEATURES_OK;
+
+        if (!(dev->mmio_config->status & VIRTIO_STATUS_FEATURES_OK))
+            return ERR_BAD_STATE;
+    }
+
+    return NO_ERROR;
 }
 
 void virtio_status_driver_ok(struct virtio_device *dev)

@@ -139,6 +139,15 @@ static inline void vring_init(struct vring *vr, unsigned int num, void *p,
 		+ align-1) & ~(align - 1));
 }
 
+static inline void vring_init_v1(struct vring *vr, unsigned int num, void *desc, void *avail, void *used)
+{
+    vr->num = num;
+    vr->desc = desc;
+    vr->avail = avail;
+    vr->used = used;
+}
+
+
 static inline unsigned vring_size(unsigned int num, unsigned long align)
 {
 	return ((sizeof(struct vring_desc) * num + sizeof(__u16) * (3 + num)

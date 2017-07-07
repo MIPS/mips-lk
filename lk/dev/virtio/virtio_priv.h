@@ -42,14 +42,25 @@ struct virtio_mmio_config {
     uint32_t queue_num;
     uint32_t queue_align;
     /* 0x40 */  uint32_t queue_pfn;
-    uint32_t __reserved2[3];
+    uint32_t queue_ready;
+    uint32_t __reserved2[2];
     /* 0x50 */  uint32_t queue_notify;
     uint32_t __reserved3[3];
     /* 0x60 */  uint32_t interrupt_status;
     uint32_t interrupt_ack;
     uint32_t __reserved4[2];
     /* 0x70 */  uint32_t status;
-    uint8_t __reserved5[0x8c];
+    uint32_t __reserved5[3];
+    /* 0x80 */ uint32_t queue_desc_lo;
+    uint32_t queue_desc_hi;
+    uint32_t __reserved6[2];
+    /* 0x90 */ uint32_t queue_avail_lo;
+    uint32_t queue_avail_hi;
+    uint32_t __reserved7[2];
+    /* 0xa0 */ uint32_t queue_used_lo;
+    uint32_t queue_used_hi;
+    uint8_t __reserved8[0x54];
+    uint32_t config_generation;
     /* 0x100 */ uint32_t config[0];
 };
 
