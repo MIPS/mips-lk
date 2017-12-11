@@ -31,6 +31,9 @@
 #include <arch/mmu.h>
 #include <kernel/thread.h>
 #include <debug.h>
+#if defined(WITH_LIB_UTHREAD) && defined(UTHREAD_WITH_MEMORY_MAPPING_SUPPORT)
+#include <uthread.h>
+#endif
 
 #define LOCAL_TRACE 0
 
@@ -128,8 +131,22 @@ void *paddr_to_kvaddr(paddr_t pa)
 paddr_t vaddr_to_paddr(void *ptr)
 {
     vmm_aspace_t *aspace = vaddr_to_aspace(ptr);
+
+#if defined(WITH_LIB_UTHREAD) && defined(UTHREAD_WITH_MEMORY_MAPPING_SUPPORT)
+    if (!aspace) {
+        paddr_t pa;
+        status_t rc;
+
+        rc = uthread_virt_to_phys(uthread_get_current(), (vaddr_t)ptr, &pa);
+        if (rc == NO_ERROR)
+            return pa;
+
+        return (paddr_t)NULL;
+    }
+#else
     if (!aspace)
         return (paddr_t)NULL;
+#endif
 
     paddr_t pa;
     status_t rc = arch_mmu_query(&aspace->arch_aspace, (vaddr_t)ptr, &pa, NULL);
