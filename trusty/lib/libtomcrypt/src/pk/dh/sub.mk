@@ -1,0 +1,11 @@
+src-y += dh_check_pubkey.c
+src-y += dh_export.c
+src-y += dh_export_key.c
+src-y += dh_free.c
+src-y += dh_generate_key.c
+src-y += dh_import.c
+src-y += dh_set.c
+src-y += dh_set_pg_dhparam.c
+src-y += dh_shared_secret.c
+srcs-y += dh.c
+cflags-dh.c-y += -Wno-unused-variable
