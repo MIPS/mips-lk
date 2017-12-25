@@ -52,7 +52,8 @@ static unsigned long rng_nix(unsigned char *buf, unsigned long len,
 
 #endif /* LTC_DEVRANDOM */
 
-#if !defined(_WIN32_WCE)
+/* on ANSI C platforms with 100 < CLOCKS_PER_SEC < 10000 */
+#if defined(CLOCKS_PER_SEC) && !defined(_WIN32_WCE)
 
 #define ANSI_RNG
 
@@ -61,6 +62,9 @@ static unsigned long rng_ansic(unsigned char *buf, unsigned long len,
 {
    clock_t t1;
    int l, acc, bits, a, b;
+
+   if (XCLOCKS_PER_SEC < 100 || XCLOCKS_PER_SEC > 10000)
+       return 0;
 
    l = len;
    bits = 8;

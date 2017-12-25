@@ -667,11 +667,17 @@ int der_printable_value_decode(int v);
 
 /* UTF-8 */
 #if (defined(SIZE_MAX) || __STDC_VERSION__ >= 199901L || defined(WCHAR_MAX) || defined(__WCHAR_MAX__) || defined(_WCHAR_T) || defined(_WCHAR_T_DEFINED) || defined (__WCHAR_TYPE__)) && !defined(LTC_NO_WCHAR)
+#ifdef LK
+#define __need_wchar_t
+#include <stddef.h>
+#else
+else
 #include <wchar.h>
 #if defined(__WCHAR_MAX__)
 #define LTC_WCHAR_MAX __WCHAR_MAX__
 #elif defined(WCHAR_MAX)
 #define LTC_WCHAR_MAX WCHAR_MAX
+#endif
 #endif
 /* please note that it might happen that LTC_WCHAR_MAX is undefined */
 #else

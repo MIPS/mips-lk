@@ -14,7 +14,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stddef.h>   // for ptrdiff_t
+#ifndef LK
 #include <time.h>
+#endif
 #include <ctype.h>
 #include <limits.h>
 

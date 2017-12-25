@@ -602,7 +602,29 @@ static int isprime(void *a, int b, int *c)
 	return CRYPT_OK;
 }
 
-static int rand(void *a, int size)
+static int addmod(void *a, void *b, void *c, void *d)
+{
+	LTC_ARGCHK(a != NULL);
+	LTC_ARGCHK(b != NULL);
+	LTC_ARGCHK(c != NULL);
+	LTC_ARGCHK(d != NULL);
+	mpa_add_mod((mpanum) d, (mpanum) a, (mpanum) b, (mpanum) c,
+		external_mem_pool);
+	return CRYPT_OK;
+}
+
+static int submod(void *a, void *b, void *c, void *d)
+{
+	LTC_ARGCHK(a != NULL);
+	LTC_ARGCHK(b != NULL);
+	LTC_ARGCHK(c != NULL);
+	LTC_ARGCHK(d != NULL);
+	mpa_sub_mod((mpanum) d, (mpanum) a, (mpanum) b, (mpanum) c,
+		external_mem_pool);
+	return CRYPT_OK;
+}
+
+static int rand2(void *a, int size)
 {
 	return mpa_get_random_digits(a, size) != size ?
 					CRYPT_ERROR_READPRNG : CRYPT_OK;
@@ -613,7 +635,6 @@ ltc_math_descriptor ltc_mp = {
 	.bits_per_digit = MPA_WORD_SIZE,
 
 	.init = &init,
-	.init_size = &init_size,
 	.init_copy = &init_copy,
 	.deinit = &deinit,
 
@@ -649,7 +670,6 @@ ltc_math_descriptor ltc_mp = {
 	.gcd = &gcd,
 	.lcm = &lcm,
 
-	.mod = &mod,
 	.mulmod = &mulmod,
 	.sqrmod = &sqrmod,
 	.invmod = &invmod,
@@ -684,6 +704,8 @@ ltc_math_descriptor ltc_mp = {
 	.rsa_keygen = &rsa_make_key,
 	.rsa_me = &rsa_exptmod,
 #endif
-	.rand = &rand,
+	.addmod = &addmod,
+	.submod = &submod,
+	.rand = &rand2,
 
 };

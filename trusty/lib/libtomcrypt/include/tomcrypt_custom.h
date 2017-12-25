@@ -50,6 +50,10 @@
 #define XCLOCK   clock
 #endif
 
+#ifndef XCLOCKS_PER_SEC
+#define XCLOCKS_PER_SEC CLOCKS_PER_SEC
+#endif
+
 #ifndef XQSORT
 #define XQSORT qsort
 #endif
@@ -130,6 +134,132 @@
    #undef LTC_NO_FILE
 #endif
 
+/* For LK ltc_mp is defined and initialized in mpa_desc.c, so prevent
+ * definition in crypt_ltc_mp_descriptor.c
+ */
+#define LTC_MP_LK_FIX
+
+/* Set LTC_ options based on OP-TEE configuration */
+
+#define LTC_NO_CIPHERS
+
+#ifdef CFG_CRYPTO_AES
+   #define LTC_RIJNDAEL
+#endif
+#ifdef CFG_CRYPTO_DES
+   #define LTC_DES
+#endif
+
+#define LTC_NO_MODES
+
+#ifdef CFG_CRYPTO_ECB
+   #define LTC_ECB_MODE
+#endif
+#if defined(CFG_CRYPTO_CBC) || defined(CFG_CRYPTO_CBC_MAC)
+   #define LTC_CBC_MODE
+#endif
+#ifdef CFG_CRYPTO_CTR
+   #define LTC_CTR_MODE
+#endif
+#ifdef CFG_CRYPTO_XTS
+   #define LTC_XTS_MODE
+#endif
+
+#define LTC_NO_HASHES
+
+#define LTC_HASH_HELPERS
+#ifdef CFG_CRYPTO_MD5
+#define LTC_MD5
+#endif
+#ifdef CFG_CRYPTO_SHA1
+#define LTC_SHA1
+#endif
+#ifdef CFG_CRYPTO_SHA1_ARM32_CE
+#define LTC_SHA1_ARM32_CE
+#endif
+#ifdef CFG_CRYPTO_SHA1_ARM64_CE
+#define LTC_SHA1_ARM64_CE
+#endif
+#ifdef CFG_CRYPTO_SHA224
+#define LTC_SHA224
+#endif
+#ifdef CFG_CRYPTO_SHA256
+#define LTC_SHA256
+#endif
+#ifdef CFG_CRYPTO_SHA384
+#define LTC_SHA384
+#endif
+#ifdef CFG_CRYPTO_SHA512
+#define LTC_SHA512
+#endif
+
+#define LTC_NO_MACS
+
+#ifdef CFG_CRYPTO_HMAC
+   #define LTC_HMAC
+#endif
+#ifdef CFG_CRYPTO_CMAC
+   #define LTC_OMAC
+#endif
+#ifdef CFG_CRYPTO_CCM
+   #define LTC_CCM_MODE
+#endif
+#ifdef CFG_CRYPTO_GCM
+   #define LTC_GCM_MODE
+#endif
+
+#define LTC_NO_PRNGS
+
+#define LTC_SPRNG
+#define LTC_RNG_GET_BYTES
+#define LTC_FORTUNA
+#define LTC_DEVRANDOM
+#define LTC_TRY_URANDOM_FIRST
+
+#define LTC_NO_PK
+
+#ifdef CFG_CRYPTO_RSA
+   #define LTC_MRSA
+#endif
+#ifdef CFG_CRYPTO_DSA
+   #define LTC_MDSA
+#endif
+#ifdef CFG_CRYPTO_DH
+   #define LTC_MDH
+#endif
+#ifdef CFG_CRYPTO_ECC
+   #define LTC_MECC
+
+   /* use Shamir's trick for point mul (speeds up signature verification) */
+   /* #define LTC_ECC_SHAMIR */
+
+   #if defined(TFM_LTC_DESC) && defined(LTC_MECC)
+   #define LTC_MECC_ACCEL
+   #endif
+
+   /* do we want fixed point ECC */
+   /* #define LTC_MECC_FP */
+
+   /* Timing Resistant */
+   #define LTC_ECC_TIMING_RESISTANT
+
+   #define LTC_ECC192
+   #define LTC_ECC224
+   #define LTC_ECC256
+   #define LTC_ECC384
+   #define LTC_ECC521
+
+   /* ECC 521 bits is the max supported key size */
+   #define LTC_MAX_ECC 521
+#endif
+
+#define LTC_NO_PKCS
+
+#if defined(CFG_CRYPTO_RSA) || defined(CFG_CRYPTO_DSA) || \
+   defined(CFG_CRYPTO_ECC)
+   #define LTC_DER
+#endif
+
 /* Enable self-test test vector checking */
 #ifndef LTC_NO_TEST
    #define LTC_TEST
@@ -144,10 +274,10 @@
 /* #define LTC_CLEAN_STACK */
 
 /* disable all file related functions */
-/* #define LTC_NO_FILE */
+ #define LTC_NO_FILE
 
 /* disable all forms of ASM */
-/* #define LTC_NO_ASM */
+ #define LTC_NO_ASM
 
 /* disable FAST mode */
 /* #define LTC_NO_FAST */

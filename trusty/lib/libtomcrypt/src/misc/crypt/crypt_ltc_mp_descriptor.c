@@ -8,8 +8,10 @@
  */
 #include "tomcrypt.h"
 
+#ifndef LTC_MP_LK_FIX
 /* Initialize ltc_mp to nulls, to force allocation on all platforms, including macOS. */
 ltc_math_descriptor ltc_mp = { 0 };
+#endif
 
 /* ref:         HEAD -> master, tag: v1.18.0 */
 /* git commit:  0676c9aec7299f5c398d96cbbb64f7e38f67d73f */

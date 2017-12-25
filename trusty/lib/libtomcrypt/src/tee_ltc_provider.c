@@ -26,8 +26,8 @@
  */
 
 #include <assert.h>
-#include <tee/tee_cryp_provider.h>
-#include <tee/tee_cryp_utl.h>
+#include <lib/tee/tee_cryp_provider.h>
+#include <lib/tee/tee_cryp_utl.h>
 
 #include <tomcrypt.h>
 #include <mpalib.h>
@@ -35,40 +35,41 @@
 #include <string.h>
 #include <utee_defines.h>
 #include <trace.h>
-#include <tee_api_types.h>
+#include <tee_common_uapi.h>
 #include <string_ext.h>
 #include <util.h>
-#include <kernel/panic.h>
+#include <debug.h>
 #include "tomcrypt_mpa.h"
 
 #if defined(CFG_WITH_VFP)
-#include <tomcrypt_arm_neon.h>
 #include <kernel/thread.h>
 #endif
+
+#define EMSG TRACEF
 
 #if !defined(CFG_WITH_SOFTWARE_PRNG)
 
 /* Random generator */
-static int prng_mpa_start(union Prng_state *prng __unused)
+static int prng_mpa_start(prng_state * prng __unused)
 {
 	return CRYPT_OK;
 }
 
 static int prng_mpa_add_entropy(const unsigned char *in __unused,
 				unsigned long inlen __unused,
-				union Prng_state *prng __unused)
+				prng_state * prng __unused)
 {
 	/* No entropy is required */
 	return CRYPT_OK;
 }
 
-static int prng_mpa_ready(union Prng_state *prng __unused)
+static int prng_mpa_ready(prng_state * prng __unused)
 {
 	return CRYPT_OK;
 }
 
 static unsigned long prng_mpa_read(unsigned char *out, unsigned long outlen,
-				   union Prng_state *prng __unused)
+				   prng_state * prng __unused)
 {
 	if (TEE_SUCCESS == get_rng_array(out, outlen))
 		return outlen;
@@ -76,21 +77,21 @@ static unsigned long prng_mpa_read(unsigned char *out, unsigned long outlen,
 		return 0;
 }
 
-static int prng_mpa_done(union Prng_state *prng __unused)
+static int prng_mpa_done(prng_state * prng __unused)
 {
 	return CRYPT_OK;
 }
 
 static int prng_mpa_export(unsigned char *out __unused,
 			   unsigned long *outlen __unused,
-			   union Prng_state *prng __unused)
+			   prng_state * prng __unused)
 {
 	return CRYPT_OK;
 }
 
 static int prng_mpa_import(const unsigned char *in  __unused,
 			   unsigned long inlen __unused,
-			   union Prng_state *prng __unused)
+			   prng_state * prng __unused)
 {
 	return CRYPT_OK;
 }
@@ -159,13 +160,13 @@ static TEE_Result tee_ltc_prng_init(struct tee_ltc_prng *prng)
 		return TEE_ERROR_BAD_PARAMETERS;
 
 	if (!prng->inited) {
-		res = prng_descriptor[prng_index]->start(&prng->state);
+		res = prng_descriptor[prng_index].start(&prng->state);
 		if (res != CRYPT_OK)
 			return TEE_ERROR_BAD_STATE;
 
 		plat_prng_add_jitter_entropy_norpc();
 
-		res = prng_descriptor[prng_index]->ready(&prng->state);
+		res = prng_descriptor[prng_index].ready(&prng->state);
 		if (res != CRYPT_OK)
 			return TEE_ERROR_BAD_STATE;
 
@@ -409,7 +410,7 @@ static TEE_Result hash_init(void *ctx, uint32_t algo)
 	if (ltc_res != TEE_SUCCESS)
 		return TEE_ERROR_NOT_SUPPORTED;
 
-	if (hash_descriptor[ltc_hashindex]->init(ctx) == CRYPT_OK)
+	if (hash_descriptor[ltc_hashindex].init(ctx) == CRYPT_OK)
 		return TEE_SUCCESS;
 	else
 		return TEE_ERROR_BAD_STATE;
@@ -425,7 +426,7 @@ static TEE_Result hash_update(void *ctx, uint32_t algo,
 	if (ltc_res != TEE_SUCCESS)
 		return TEE_ERROR_NOT_SUPPORTED;
 
-	if (hash_descriptor[ltc_hashindex]->process(ctx, data, len) == CRYPT_OK)
+	if (hash_descriptor[ltc_hashindex].process(ctx, data, len) == CRYPT_OK)
 		return TEE_SUCCESS;
 	else
 		return TEE_ERROR_BAD_STATE;
@@ -447,7 +448,7 @@ static TEE_Result hash_final(void *ctx, uint32_t algo, uint8_t *digest,
 	if (len == 0)
 		return TEE_ERROR_BAD_PARAMETERS;
 
-	hash_size = hash_descriptor[ltc_hashindex]->hashsize;
+	hash_size = hash_descriptor[ltc_hashindex].hashsize;
 
 	if (hash_size > len) {
 		if (hash_size > sizeof(block_digest))
@@ -456,7 +457,7 @@ static TEE_Result hash_final(void *ctx, uint32_t algo, uint8_t *digest,
 	} else {
 		tmp_digest = digest;
 	}
-	if (hash_descriptor[ltc_hashindex]->done(ctx, tmp_digest) == CRYPT_OK) {
+	if (hash_descriptor[ltc_hashindex].done(ctx, tmp_digest) == CRYPT_OK) {
 		if (hash_size > len)
 			memcpy(digest, tmp_digest, len);
 	} else {
@@ -1205,11 +1206,10 @@ static TEE_Result rsassa_verify(uint32_t algo, struct rsa_public_key *key,
 
 	ltc_res = rsa_verify_hash_ex(sig, sig_len, msg, msg_len, ltc_rsa_algo,
 				     ltc_hashindex, salt_len, &stat, &ltc_key);
-	if ((ltc_res != CRYPT_OK) || (stat != 1)) {
+	if ((ltc_res == CRYPT_OK) && (stat == 1))
+		res = TEE_SUCCESS;
+	else
 		res = TEE_ERROR_SIGNATURE_INVALID;
-		goto err;
-	}
-	res = TEE_SUCCESS;
 
 err:
 	return res;
@@ -1412,7 +1412,7 @@ static TEE_Result dsa_verify(uint32_t algo, struct dsa_public_key *key,
 	if ((ltc_res == CRYPT_OK) && (ltc_stat == 1))
 		res = TEE_SUCCESS;
 	else
-		res = TEE_ERROR_GENERIC;
+		res = TEE_ERROR_SIGNATURE_INVALID;
 
 err:
 	return res;
@@ -1454,39 +1454,85 @@ static TEE_Result gen_dh_key(struct dh_keypair *key, struct bignum *q,
 	dh_key ltc_tmp_key;
 	int ltc_res;
 	struct tee_ltc_prng *prng = tee_ltc_get_prng();
+	int key_size = 0;       /* max key size, in bytes */
+	int key_size_p = 0;     /* key size of p */
+	int key_size_q = 0;     /* key size of p */
+
+	/*
+	 * Check xbits key size constraints
+	 */
+	if (xbits) {
+		LTC_ARGCHK((xbits % 8) == 0);
+		key_size = xbits / 8;
+	}
+	if (key_size) {
+		key_size_p = ltc_mp.unsigned_size(key->p);
+		if (q)
+			key_size_q = ltc_mp.unsigned_size(q);
+		/* check the constraints */
+		LTC_ARGCHK(key_size <= key_size_p);
+		LTC_ARGCHK((q == NULL) || (key_size <= key_size_q));
+	}
 
 	/* Generate the DH key */
-	ltc_tmp_key.g = key->g;
-	ltc_tmp_key.p = key->p;
-	ltc_res = dh_make_key(&prng->state, prng->index, q, xbits,
-			      &ltc_tmp_key);
+	ltc_tmp_key.base = key->g;
+	ltc_tmp_key.prime = key->p;
+	/* initialize the key fields x and y */
+	ltc_tmp_key.x = NULL;
+	ltc_tmp_key.y = NULL;
+	ltc_res = mp_init_multi(&ltc_tmp_key.x, &ltc_tmp_key.y, NULL);
+	if (ltc_res != CRYPT_OK) {
+		res = TEE_ERROR_BAD_PARAMETERS;
+		goto key_init_err;
+	}
+
+	ltc_res = dh_generate_key(&prng->state, prng->index, &ltc_tmp_key);
 	if (ltc_res != CRYPT_OK) {
 		res = TEE_ERROR_BAD_PARAMETERS;
 	} else {
 		ltc_mp.copy(ltc_tmp_key.y,  key->y);
 		ltc_mp.copy(ltc_tmp_key.x,  key->x);
 
-		/* Free the tempory key */
-		dh_free(&ltc_tmp_key);
+		/* Free initialized fields of the tempory key */
+		ltc_mp.deinit(ltc_tmp_key.y);
+		ltc_mp.deinit(ltc_tmp_key.x);
 		res = TEE_SUCCESS;
 	}
+key_init_err:
 	return res;
 }
 
 static TEE_Result do_dh_shared_secret(struct dh_keypair *private_key,
-				      struct bignum *public_key,
-				      struct bignum *secret)
+				      uint8_t *in_y,
+				      unsigned long in_y_len,
+				      unsigned char *secret,
+				      uint32_t *secret_len)
 {
 	int err;
+	printf("%s\n", __func__);
 	dh_key pk = {
 		.type = PK_PRIVATE,
-		.g = private_key->g,
-		.p = private_key->p,
+		.base = private_key->g,
+		.prime = private_key->p,
 		.y = private_key->y,
 		.x = private_key->x
 	};
+	dh_key public_key = {
+		.type = PK_PUBLIC,
+		.base = private_key->g,
+		.prime = private_key->p,
+		.y = NULL,
+		.x = NULL
+	};
 
-	err = dh_shared_secret(&pk, public_key, secret);
+	mp_init(&public_key.y);
+	err = dh_set_key((unsigned char *)in_y, in_y_len,
+		PK_PUBLIC, &public_key);
+	if (err != CRYPT_OK)
+		return TEE_ERROR_BAD_PARAMETERS;
+
+	err = dh_shared_secret(&pk, &public_key, secret,
+		(unsigned long *)secret_len);
 	return ((err == CRYPT_OK) ? TEE_SUCCESS : TEE_ERROR_BAD_PARAMETERS);
 }
 
@@ -1538,7 +1584,7 @@ static void free_ecc_public_key(struct ecc_public_key *s)
 
 /*
  * curve is part of TEE_ECC_CURVE_NIST_P192,...
- * algo is part of TEE_ALG_ECDSA_P192,..., and 0 if we do not have it
+ * algo is part of TEE_ALG_ECDSA_SHA1,..., and 0 if we do not have it
  */
 static TEE_Result ecc_get_keysize(uint32_t curve, uint32_t algo,
 				  size_t *key_size_bytes, size_t *key_size_bits)
@@ -1553,38 +1599,38 @@ static TEE_Result ecc_get_keysize(uint32_t curve, uint32_t algo,
 	 */
 
 	/*
-	 * Note GPv1.1 indicates TEE_ALG_ECDH_NIST_P192_DERIVE_SHARED_SECRET
-	 * but defines TEE_ALG_ECDH_P192
+	 * Accept the following:
+	 * TEE_ALG_ECDSA_SHA1   (TEE_ALG_ECDSA_P192 - deprecated)
+	 * TEE_ALG_ECDSA_SHA224 (TEE_ALG_ECDSA_P224 - deprecated)
+	 * TEE_ALG_ECDSA_SHA256 (TEE_ALG_ECDSA_P256 - deprecated)
+	 * TEE_ALG_ECDSA_SHA384 (TEE_ALG_ECDSA_P384 - deprecated)
+	 * TEE_ALG_ECDSA_SHA512 (TEE_ALG_ECDSA_P521 - deprecated)
+	 * TEE_ALG_ECDH_DERIVE_SHARED_SECRET
+	 * (TEE_ALG_ECDH_P192 - deprecated)
+	 * (TEE_ALG_ECDH_P224 - deprecated)
+	 * (TEE_ALG_ECDH_P256 - deprecated)
+	 * (TEE_ALG_ECDH_P384 - deprecated)
+	 * (TEE_ALG_ECDH_P521 - deprecated)
 	 */
+	if ((algo != 0) && TEE_ALG_GET_MAIN_ALG(algo) != TEE_MAIN_ALGO_ECC)
+		return TEE_ERROR_BAD_PARAMETERS;
 
 	switch (curve) {
 	case TEE_ECC_CURVE_NIST_P192:
 		*key_size_bits = 192;
 		*key_size_bytes = 24;
-		if ((algo != 0) && (algo != TEE_ALG_ECDSA_P192) &&
-		    (algo != TEE_ALG_ECDH_P192))
-			return TEE_ERROR_BAD_PARAMETERS;
 		break;
 	case TEE_ECC_CURVE_NIST_P224:
 		*key_size_bits = 224;
 		*key_size_bytes = 28;
-		if ((algo != 0) && (algo != TEE_ALG_ECDSA_P224) &&
-		    (algo != TEE_ALG_ECDH_P224))
-			return TEE_ERROR_BAD_PARAMETERS;
 		break;
 	case TEE_ECC_CURVE_NIST_P256:
 		*key_size_bits = 256;
 		*key_size_bytes = 32;
-		if ((algo != 0) && (algo != TEE_ALG_ECDSA_P256) &&
-		    (algo != TEE_ALG_ECDH_P256))
-			return TEE_ERROR_BAD_PARAMETERS;
 		break;
 	case TEE_ECC_CURVE_NIST_P384:
 		*key_size_bits = 384;
 		*key_size_bytes = 48;
-		if ((algo != 0) && (algo != TEE_ALG_ECDSA_P384) &&
-		    (algo != TEE_ALG_ECDH_P384))
-			return TEE_ERROR_BAD_PARAMETERS;
 		break;
 	case TEE_ECC_CURVE_NIST_P521:
 		*key_size_bits = 521;
@@ -1593,9 +1639,6 @@ static TEE_Result ecc_get_keysize(uint32_t curve, uint32_t algo,
 		 * if it the real key size
 		 */
 		*key_size_bytes = 66;
-		if ((algo != 0) && (algo != TEE_ALG_ECDSA_P521) &&
-		    (algo != TEE_ALG_ECDH_P521))
-			return TEE_ERROR_BAD_PARAMETERS;
 		break;
 	default:
 		*key_size_bits = 0;
@@ -1734,7 +1777,6 @@ static TEE_Result ecc_sign(uint32_t algo, struct ecc_keypair *key,
 {
 	TEE_Result res;
 	int ltc_res;
-	void *r, *s;
 	size_t key_size_bytes;
 	ecc_key ltc_key;
 	struct tee_ltc_prng *prng = tee_ltc_get_prng();
@@ -1755,28 +1797,13 @@ static TEE_Result ecc_sign(uint32_t algo, struct ecc_keypair *key,
 		goto err;
 	}
 
-	ltc_res = mp_init_multi(&r, &s, NULL);
-	if (ltc_res != CRYPT_OK) {
-		res = TEE_ERROR_OUT_OF_MEMORY;
-		goto err;
-	}
-
-	ltc_res = ecc_sign_hash_raw(msg, msg_len, r, s,
+	ltc_res = ecc_sign_hash(msg, msg_len, sig, sig_len,
 				    &prng->state, prng->index, &ltc_key);
 
-	if (ltc_res == CRYPT_OK) {
-		*sig_len = 2 * key_size_bytes;
-		memset(sig, 0, *sig_len);
-		mp_to_unsigned_bin(r, (uint8_t *)sig + *sig_len/2 -
-				   mp_unsigned_bin_size(r));
-		mp_to_unsigned_bin(s, (uint8_t *)sig + *sig_len -
-				   mp_unsigned_bin_size(s));
+	if (ltc_res == CRYPT_OK)
 		res = TEE_SUCCESS;
-	} else {
+	else
 		res = TEE_ERROR_GENERIC;
-	}
-
-	mp_clear_multi(r, s, NULL);
 
 err:
 	return res;
@@ -1789,8 +1816,6 @@ static TEE_Result ecc_verify(uint32_t algo, struct ecc_public_key *key,
 	TEE_Result res;
 	int ltc_stat;
 	int ltc_res;
-	void *r;
-	void *s;
 	void *key_z;
 	size_t key_size_bytes;
 	ecc_key ltc_key;
@@ -1799,7 +1824,7 @@ static TEE_Result ecc_verify(uint32_t algo, struct ecc_public_key *key,
 		return TEE_ERROR_BAD_PARAMETERS;
 	}
 
-	ltc_res = mp_init_multi(&key_z, &r, &s, NULL);
+	ltc_res = mp_init_multi(&key_z, NULL);
 	if (ltc_res != CRYPT_OK) {
 		return TEE_ERROR_OUT_OF_MEMORY;
 	}
@@ -1810,22 +1835,20 @@ static TEE_Result ecc_verify(uint32_t algo, struct ecc_public_key *key,
 		goto out;
 
 	/* check keysize vs sig_len */
-	if ((key_size_bytes * 2) != sig_len) {
+	if ((key_size_bytes * 2) > sig_len) {
 		res = TEE_ERROR_BAD_PARAMETERS;
 		goto out;
 	}
 
-	mp_read_unsigned_bin(r, (uint8_t *)sig, sig_len/2);
-	mp_read_unsigned_bin(s, (uint8_t *)sig + sig_len/2, sig_len/2);
-
-	ltc_res = ecc_verify_hash_raw(r, s, msg, msg_len, &ltc_stat, &ltc_key);
+	ltc_res = ecc_verify_hash(sig, sig_len, msg, msg_len,
+					  &ltc_stat, &ltc_key);
 	if ((ltc_res == CRYPT_OK) && (ltc_stat == 1))
 		res = TEE_SUCCESS;
 	else
-		res = TEE_ERROR_GENERIC;
+		res = TEE_ERROR_SIGNATURE_INVALID;
 
 out:
-	mp_clear_multi(key_z, r, s, NULL);
+	mp_clear_multi(key_z, NULL);
 	return res;
 }
 
@@ -1920,7 +1943,7 @@ static TEE_Result cipher_get_block_size(uint32_t algo, size_t *size)
 	if (res != TEE_SUCCESS)
 		return TEE_ERROR_NOT_SUPPORTED;
 
-	*size = cipher_descriptor[ltc_cipherindex]->block_length;
+	*size = cipher_descriptor[ltc_cipherindex].block_length;
 	return TEE_SUCCESS;
 }
 
@@ -2046,7 +2069,7 @@ static TEE_Result cipher_init(void *ctx, uint32_t algo,
 	case TEE_ALG_AES_CBC_NOPAD:
 	case TEE_ALG_DES_CBC_NOPAD:
 		if (iv_len !=
-		    (size_t)cipher_descriptor[ltc_cipherindex]->block_length)
+		    (size_t)cipher_descriptor[ltc_cipherindex].block_length)
 			return TEE_ERROR_BAD_PARAMETERS;
 		ltc_res = cbc_start(
 			ltc_cipherindex, iv, key1, key1_len,
@@ -2058,7 +2081,7 @@ static TEE_Result cipher_init(void *ctx, uint32_t algo,
 		get_des2_key(key1, key1_len, key_array,
 			     &real_key, &real_key_len);
 		if (iv_len !=
-		    (size_t)cipher_descriptor[ltc_cipherindex]->block_length)
+		    (size_t)cipher_descriptor[ltc_cipherindex].block_length)
 			return TEE_ERROR_BAD_PARAMETERS;
 		ltc_res = cbc_start(
 			ltc_cipherindex, iv, real_key, real_key_len,
@@ -2068,7 +2091,7 @@ static TEE_Result cipher_init(void *ctx, uint32_t algo,
 #if defined(CFG_CRYPTO_CTR)
 	case TEE_ALG_AES_CTR:
 		if (iv_len !=
-		    (size_t)cipher_descriptor[ltc_cipherindex]->block_length)
+		    (size_t)cipher_descriptor[ltc_cipherindex].block_length)
 			return TEE_ERROR_BAD_PARAMETERS;
 		ltc_res = ctr_start(
 			ltc_cipherindex, iv, key1, key1_len,
@@ -2341,7 +2364,7 @@ static TEE_Result mac_init(void *ctx, uint32_t algo, const uint8_t *key,
 			return res;
 
 		cbc->block_len =
-			cipher_descriptor[ltc_cipherindex]->block_length;
+			cipher_descriptor[ltc_cipherindex].block_length;
 		if (CBCMAC_MAX_BLOCK_LEN < cbc->block_len)
 			return TEE_ERROR_BAD_PARAMETERS;
 		memset(iv, 0, cbc->block_len);
@@ -2919,7 +2942,7 @@ static TEE_Result prng_read(void *buf, size_t blen)
 	if (err != CRYPT_OK)
 		return TEE_ERROR_BAD_STATE;
 
-	if (prng_descriptor[prng->index]->read(buf, blen, &prng->state) !=
+	if (prng_descriptor[prng->index].read(buf, blen, &prng->state) !=
 			(unsigned long)blen)
 		return TEE_ERROR_BAD_STATE;
 
@@ -2960,7 +2983,7 @@ static TEE_Result prng_add_entropy(const uint8_t *inbuf, size_t len)
 	if (err != CRYPT_OK)
 		return _tee_ltc_prng_add_entropy(inbuf, len);
 
-	err = prng_descriptor[prng->index]->add_entropy(
+	err = prng_descriptor[prng->index].add_entropy(
 			inbuf, len, &prng->state);
 
 	if (err != CRYPT_OK)
