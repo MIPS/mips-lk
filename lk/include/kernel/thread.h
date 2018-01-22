@@ -81,7 +81,7 @@ enum thread_tls_list {
 #define THREAD_FLAG_DEBUG_STACK_BOUNDS_CHECK  (1<<5)
 
 #define THREAD_MAGIC (0x74687264) // 'thrd'
-#define THREAD_NAME_LEN 32
+#define THREAD_NAME_LEN 48
 
 typedef struct thread {
     int magic;
