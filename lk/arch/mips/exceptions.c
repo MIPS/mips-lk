@@ -1,4 +1,6 @@
 /*
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  * Copyright (c) 2015 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
@@ -59,7 +61,7 @@ static int is_user_mode(uint32_t status)
     return !!(status & SR_KSU_USER);
 }
 
-inline uint32_t exc_code(struct mips_iframe *iframe)
+static inline uint32_t exc_code(struct mips_iframe *iframe)
 {
     return BITS_SHIFT(iframe->cause, 6, 2);
 }
@@ -420,7 +422,11 @@ void mips_irq(struct mips_iframe *iframe, uint num)
         ret = platform_irq(iframe, num);
 #endif
     } else {
+#if PLATFORM_MIPS_VIRT
+        ret = platform_irq(iframe, num);
+#else
         exception_die_kernel(iframe, "unhandled irq");
+#endif
     }
 
     KEVLOG_IRQ_EXIT(num);

@@ -36,10 +36,6 @@ FUNCTION(_start)
     bne     $t0, $t1, 0b
 
     # args to main and call it
-    li      $a0, 1
-    li      $a1, 2
-    li      $a2, 3
-    li      $a3, 4
     jal     lk_main
 
     # should never return here

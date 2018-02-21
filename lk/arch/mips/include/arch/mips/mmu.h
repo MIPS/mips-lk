@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -52,37 +53,37 @@
 #define KSEG2           ((uintptr_t)0xc0000000)
 #define KSEG3           ((uintptr_t)0xe0000000)
 
-inline int is_low_512mb(uintptr_t addr)
+static inline int is_low_512mb(uintptr_t addr)
 {
     return !(addr & ~LOW_512MB_MASK);
 }
 
-inline int is_kseg0(uintptr_t addr)
+static inline int is_kseg0(uintptr_t addr)
 {
     return (addr >= KSEG0) && (addr < KSEG1);
 }
 
-inline int is_kseg1(uintptr_t addr)
+static inline int is_kseg1(uintptr_t addr)
 {
     return (addr >= KSEG1) && (addr < KSEG2);
 }
 
-inline int is_kseg2(uintptr_t addr)
+static inline int is_kseg2(uintptr_t addr)
 {
     return addr >= KSEG2;
 }
 
-inline uintptr_t phys_to_kseg0(uintptr_t addr)
+static inline uintptr_t phys_to_kseg0(uintptr_t addr)
 {
     return addr | KSEG0;
 }
 
-inline uintptr_t kseg0_to_phys(uintptr_t addr)
+static inline uintptr_t kseg0_to_phys(uintptr_t addr)
 {
     return addr - KSEG0;
 }
 
-inline uintptr_t kseg1_to_phys(uintptr_t addr)
+static inline uintptr_t kseg1_to_phys(uintptr_t addr)
 {
     return addr - KSEG1;
 }

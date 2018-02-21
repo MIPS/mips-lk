@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -24,6 +25,7 @@
 #include <mips/m32tlb.h>
 #include <mips/m32c0.h>
 #include <arch/mips.h>
+#include <arch/defines.h>
 
 void mips_invalidate_tlb_global(void)
 {
@@ -40,10 +42,44 @@ void mips_invalidate_tlb_asid(vaddr_t va, uint32_t asid)
 #define PG_XIE (1 << 30)
 #define PG_IEC (1 << 27)
 
+static void mips_setup_ftlb(void)
+{
+    // do we even have a FTLB?
+    if (((mips_read_c0_config() >> 7) & 7) != 4)
+      return;
+
+    uint32_t cfg4 = mips_read_c0_config4();
+
+#if __mips_isa_rev == 6
+    unsigned mmudef = 3;
+#else
+    unsigned mmudef = (cfg4 >> 14) & 3;
+#endif
+
+    if (mmudef <= 1)
+      return;
+
+    unsigned new_ftlb_size;
+    switch (PAGE_SIZE)
+    {
+    case 0x400:  new_ftlb_size = 0; break;
+    case 0x1000: new_ftlb_size = 1; break;
+    case 0x4000: new_ftlb_size = 2; break;
+    case 0x10000: new_ftlb_size = 3; break;
+    default: new_ftlb_size = 0; break;
+    }
+
+    cfg4 &= ~(0x1fUL << 8);
+    cfg4 |= new_ftlb_size << 8;
+
+    mips_write_c0_config4(cfg4);
+}
+
 void mips_tlb_init(void)
 {
 #if (WITH_KERNEL_VM)
     mips_tlbinvalall();
+    mips_setup_ftlb();
 
     /* enable read and execute inhibit if implemented */
     if (mips_read_c0_config3() & CFG3_RXI)
