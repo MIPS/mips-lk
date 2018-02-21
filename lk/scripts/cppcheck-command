@@ -1,0 +1,36 @@
+#!/bin/bash
+
+CPPCHECK_BIN=cppcheck
+if !(hash ${CPPCHECK_BIN} 2>/dev/null); then
+    echo "${CPPCHECK_BIN} not installed"
+    exit 1
+fi
+
+CPPCHECK_PROJECT=${1%/}
+if [[ -d ${CPPCHECK_PROJECT} ]]; then
+    echo "CPPCHECK_PROJECT=${CPPCHECK_PROJECT}"
+else
+    echo "usage: ${0} build-<project-name>"
+    echo "Error: ${CPPCHECK_PROJECT} directory not found."
+    echo "- Specify the build directory for the project."
+    echo "- The project build directory contains the list of src and include files that will be scanned."
+    exit 2
+fi
+
+CPPCHECK_OUTPUT="cppcheck_output.${CPPCHECK_PROJECT}.txt"
+
+CPPCHECK_OPTIONS="\
+    -j2 \
+    --enable=portability,warning,information \
+    --inconclusive \
+    --force \
+    -U__POWERPC__ \
+    --include=${CPPCHECK_PROJECT}/config.h \
+    --includes-file=${CPPCHECK_PROJECT}/include_paths.txt \
+    --file-list=${CPPCHECK_PROJECT}/srcfiles.txt"
+
+# run the command
+echo "${CPPCHECK_BIN} ${CPPCHECK_OPTIONS} 2> ${CPPCHECK_OUTPUT}"
+${CPPCHECK_BIN} ${CPPCHECK_OPTIONS} 2> ${CPPCHECK_OUTPUT}
+
+echo Writing to ${CPPCHECK_OUTPUT}
