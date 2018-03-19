@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  * Copyright (c) 2013, Google Inc. All rights reserved
  * Copyright (c) 2012-2013, NVIDIA CORPORATION. All rights reserved
  *

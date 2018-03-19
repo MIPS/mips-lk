@@ -27,19 +27,19 @@
 #include <reflist.h>
 #include <kernel/mutex.h>
 #include <kernel/thread.h>
+#include <platform/interrupts.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <trace.h>
 
 #include <lk/init.h>
-#include <kernel/vm.h>
 
 #include "vqueue.h"
 #include <virtio/virtio_ring.h>
 #include <virtio/virtio_config.h>
 
-#include "trusty_virtio.h"
+#include "l4virtio_priv.h"
 
 #include <lib/trusty/handle.h>
 #include <lib/trusty/ipc.h>
@@ -72,6 +72,17 @@
  */
 #define TIPC_MAX_SRV_NAME_LEN		(256)
 
+/*
+ * Timeout for rx thread ipc send retry (msec)
+ */
+#define TIPC_RX_RETRY_TIMEOUT		5000
+
+enum {
+	VDEV_STATE_RESET = 0,
+	VDEV_STATE_GOING_ONLINE,
+	VDEV_STATE_ACTIVE,
+};
+
 
 struct tipc_ept {
 	uint32_t remote;
@@ -79,15 +90,20 @@ struct tipc_ept {
 };
 
 struct tipc_dev {
-	struct vdev		vd;
+	volatile int state;
 	const uuid_t		*uuid;
 	const void		*descr_ptr;
 	size_t			descr_size;
+
+	struct l4virtio_config *cfg;
+	struct l4virtio_queue_config *queue_cfg;
+	vaddr_t			driver_window;
 
 	struct vqueue		vqs[TIPC_VQ_NUM];
 	struct tipc_ept		epts[TIPC_ADDR_MAX_NUM];
 	unsigned long		inuse[BITMAP_NUM_WORDS(TIPC_ADDR_MAX_NUM)];
 
+	event_t			rx_retry;
 	event_t			have_handles;
 	handle_list_t		handle_list;
 
@@ -162,8 +178,6 @@ tipc_send_buf(struct tipc_dev *dev, uint32_t local, uint32_t remote,
               void *data, uint16_t data_len, bool wait);
 
 
-#define vdev_to_dev(v)  containerof((v), struct tipc_dev, vd)
-
 static inline uint addr_to_slot(uint32_t addr)
 {
 	return (uint)(addr - TIPC_ADDR_BASE);
@@ -214,6 +228,67 @@ static void free_local_addr(struct tipc_dev *dev, uint32_t local)
 	}
 }
 
+static int virtio_dev_to_kvaddr(struct tipc_dev *dev, paddr_t da, size_t size,
+		void **va)
+{
+	struct tipc_vdev_descr *desc = (struct tipc_vdev_descr *) dev->descr_ptr;
+
+	if (size > desc->driver_mem_size || da > desc->driver_mem_size - size)
+		return ERR_NO_RESOURCES;
+
+	*va = (void *)(dev->driver_window + da);
+
+	return NO_ERROR;
+}
+
+int virtio_dev_to_phys(struct tipc_dev *dev, paddr_t da, size_t size,
+		paddr_t *pa)
+{
+	void *va;
+	status_t ret;
+
+	ret = virtio_dev_to_kvaddr(dev, da, size, &va);
+	if (ret)
+		return ret;
+
+	*pa = vaddr_to_paddr(va);
+	if (*pa == (paddr_t)NULL)
+		return ERR_NO_RESOURCES;
+
+	return NO_ERROR;
+}
+
+static int virtio_map_iovs(struct tipc_dev *dev, struct vqueue_iovs *vqiovs, u_int flags)
+{
+	uint  i;
+	int ret = NO_ERROR;
+
+	for (i = 0; i < vqiovs->used; i++) {
+		void *va;
+
+		ret = virtio_dev_to_kvaddr(dev, vqiovs->phys[i],
+				vqiovs->iovs[i].len, &va);
+		if (ret)
+			break;
+
+		vqiovs->iovs[i].base = va;
+	}
+
+	return ret;
+}
+
+static void virtio_unmap_iovs(struct vqueue_iovs *vqiovs)
+{
+	for (uint i = 0; i < vqiovs->used; i++) {
+		/* base is expected to be set */
+		DEBUG_ASSERT(vqiovs->iovs[i].base);
+		/* don't do anything at the moment, the memory is fixed */
+		vqiovs->iovs[i].base = NULL;
+	}
+}
+
+
+
 static int _go_online(struct tipc_dev *dev)
 {
 	struct {
@@ -223,6 +298,8 @@ static int _go_online(struct tipc_dev *dev)
 
 	msg.hdr.type = TIPC_CTRL_MSGTYPE_GO_ONLINE;
 	msg.hdr.body_len  = 0;
+
+	dev->state = VDEV_STATE_GOING_ONLINE;
 
 	return tipc_send_buf(dev, TIPC_CTRL_ADDR, TIPC_CTRL_ADDR,
 	                     &msg, sizeof(msg), true);
@@ -401,7 +478,7 @@ static int handle_ctrl_msg(struct tipc_dev *dev, uint32_t remote,
 
 	msg_type = ns_msg_hdr->type;
 	msg_body_len = ns_msg_hdr->body_len;
-	ns_msg_body = ns_data + sizeof(struct tipc_ctrl_msg_hdr);
+	ns_msg_body = (const volatile uint8_t *)ns_data + sizeof(struct tipc_ctrl_msg_hdr);
 
 	if (sizeof(struct tipc_ctrl_msg_hdr) + msg_body_len != msg_len)
 		goto err_mailformed_msg;
@@ -427,11 +504,18 @@ err_mailformed_msg:
 	return ERR_NOT_VALID;
 }
 
+static void signal_rx_retry(struct tipc_dev *dev)
+{
+	/* unblock and set reschedule=true for the rx thread */
+	LTRACEF("sending rx_retry signal\n");
+	event_signal(&dev->rx_retry, true);
+}
+
 static int handle_chan_msg(struct tipc_dev *dev, uint32_t remote, uint32_t local,
                            const volatile void *ns_data, size_t len)
 {
 	struct tipc_ept *ept;
-	int ret = ERR_NOT_FOUND;
+	int ret;
 	ipc_msg_kern_t msg = {
 		.iov		= (iovec_kern_t []) {
 			[0]	= {
@@ -443,14 +527,30 @@ static int handle_chan_msg(struct tipc_dev *dev, uint32_t remote, uint32_t local
 		.num_handles	= 0,
 	};
 
+	event_unsignal(&dev->rx_retry);
+
+retry_send_msg:
+	ret = ERR_NOT_FOUND;
 	mutex_acquire(&dev->ept_lock);
 	ept = lookup_ept(dev, local);
 	if (ept && ept->remote == remote) {
-		if (ept->chan){
+		if (ept->chan)
 			ret = ipc_send_msg(ept->chan, &msg);
-		}
 	}
 	mutex_release(&dev->ept_lock);
+
+	if (ret == ERR_NOT_ENOUGH_BUFFER) {
+		LTRACEF("waiting for rx_retry signal...\n");
+		ret = event_wait_timeout(&dev->rx_retry,
+				TIPC_RX_RETRY_TIMEOUT);
+		if (ret == NO_ERROR) {
+			LTRACEF("... retrying ipc_send_msg\n");
+			goto retry_send_msg;
+		}
+		/* timeout not fatal; just not expected and will drop a msg */
+		DEBUG_ASSERT(ret != ERR_TIMED_OUT);
+	}
+
 	return ret;
 }
 
@@ -488,7 +588,7 @@ static int handle_rx_msg(struct tipc_dev *dev, struct vqueue_buf *buf)
 	/* map in_iovs, Non-secure, no-execute, cached, read-only */
 	uint map_flags = ARCH_MMU_FLAG_NS | ARCH_MMU_FLAG_PERM_NO_EXECUTE |
 	                 ARCH_MMU_FLAG_CACHED | ARCH_MMU_FLAG_PERM_RO;
-	int ret = vqueue_map_iovs(&buf->in_iovs, map_flags);
+	int ret = virtio_map_iovs(dev, &buf->in_iovs, map_flags);
 	if (ret) {
 		TRACEF("failed to map iovs %d\n", ret);
 		return ret;
@@ -502,7 +602,7 @@ static int handle_rx_msg(struct tipc_dev *dev, struct vqueue_buf *buf)
 	}
 
 	ns_hdr  = buf->in_iovs.iovs[0].base;
-	ns_data = buf->in_iovs.iovs[0].base + sizeof(struct tipc_hdr);
+	ns_data = (uint8_t *)buf->in_iovs.iovs[0].base + sizeof(struct tipc_hdr);
 	ns_data_len = ns_hdr->len;
 	src_addr = ns_hdr->src;
 	dst_addr = ns_hdr->dst;
@@ -520,7 +620,7 @@ static int handle_rx_msg(struct tipc_dev *dev, struct vqueue_buf *buf)
 		ret = handle_chan_msg(dev, src_addr, dst_addr, ns_data, ns_data_len);
 
 done:
-	vqueue_unmap_iovs(&buf->in_iovs);
+	virtio_unmap_iovs(&buf->in_iovs);
 
 	return ret;
 }
@@ -535,6 +635,13 @@ static int tipc_rx_thread_func(void *arg)
 	int ret;
 
 	LTRACEF("enter\n");
+
+	ret = _go_online(dev);
+	if (ret == NO_ERROR) {
+		dev->state = VDEV_STATE_ACTIVE;
+	}
+
+	LTRACEF("Device is online\n");
 
 	memset(&buf, 0, sizeof(buf));
 
@@ -556,6 +663,8 @@ static int tipc_rx_thread_func(void *arg)
 
 		if (likely(ret == NO_ERROR)) {
 			ret = handle_rx_msg(dev, &buf);
+			if (ret < 0)
+				TRACEF("Error (%d) dropping msg!\n", ret);
 		}
 
 		ret = vqueue_add_buf(vq, &buf, ret);
@@ -684,6 +793,8 @@ static void handle_hup(struct tipc_dev *dev, handle_t *chan)
 		(void) send_disc_req(dev, local, remote);
 	}
 
+	/* unblock rx thread potentially waiting to retry */
+	signal_rx_retry(dev);
 }
 
 static void handle_ready(struct tipc_dev *dev, handle_t *chan)
@@ -704,7 +815,7 @@ static void handle_ready(struct tipc_dev *dev, handle_t *chan)
 	mutex_release(&dev->ept_lock);
 
 	if (send_rsp) {
-		/* send disconnect request */
+		/* send connect response */
 		(void) send_conn_rsp(dev, local, remote, 0,
 				     IPC_CHAN_MAX_BUF_SIZE, 1);
 	}
@@ -744,6 +855,8 @@ static void handle_tx(struct tipc_dev *dev)
 			handle_tx_msg(dev, chan);
 		} else if (chan_event & IPC_HANDLE_POLL_HUP) {
 			handle_hup(dev, chan);
+		} else if (chan_event & IPC_HANDLE_POLL_SEND_UNBLOCKED) {
+			signal_rx_retry(dev);
 		} else {
 			LTRACEF("Unhandled event %x\n", chan_event);
 		}
@@ -779,9 +892,7 @@ static status_t tipc_dev_reset(struct tipc_dev *dev)
 	status_t rc;
 	struct tipc_ept *ept;
 
-	LTRACEF("devid=%d\n", dev->vd.devid);
-
-	if (dev->vd.state == VDEV_STATE_RESET)
+	if (dev->state == VDEV_STATE_RESET)
 		return NO_ERROR;
 
 	/* Shutdown rx thread to block all incomming requests */
@@ -833,37 +944,9 @@ static status_t tipc_dev_reset(struct tipc_dev *dev)
 	vqueue_destroy(&dev->vqs[TIPC_VQ_TX]);
 
 	/* enter reset state */
-	dev->vd.state = VDEV_STATE_RESET;
+	dev->state = VDEV_STATE_RESET;
 
 	return NO_ERROR;
-}
-
-static status_t tipc_vdev_reset(struct vdev *vd)
-{
-	DEBUG_ASSERT(vd);
-
-	struct tipc_dev *dev = vdev_to_dev(vd);
-	return tipc_dev_reset(dev);
-}
-
-static size_t tipc_descr_size(struct vdev *vd)
-{
-	struct tipc_dev *dev = vdev_to_dev(vd);
-	return dev->descr_size;
-}
-
-static ssize_t tipc_get_vdev_descr(struct vdev *vd, void *descr)
-{
-	struct tipc_dev *dev = vdev_to_dev(vd);
-	struct tipc_vdev_descr *vdev_descr = descr;
-
-	/* copy descrpitor out of template */
-	memcpy(vdev_descr, dev->descr_ptr, dev->descr_size);
-
-	/* patch notifyid */
-	vdev_descr->vdev.notifyid = vd->devid;
-
-	return dev->descr_size;
 }
 
 static status_t validate_descr(struct tipc_dev *dev,
@@ -874,7 +957,7 @@ static status_t validate_descr(struct tipc_dev *dev,
 		return ERR_INVALID_ARGS;
 	}
 
-	if (vdev_descr->vdev.id != VIRTIO_ID_TIPC) {
+	if (vdev_descr->vdev.id != VIRTIO_ID_L4TRUSTY_IPC) {
 		LTRACEF("unexpected vdev id%d\n", vdev_descr->vdev.id);
 		return ERR_INVALID_ARGS;
 	}
@@ -888,13 +971,26 @@ static status_t validate_descr(struct tipc_dev *dev,
 	/* check if NS driver successfully initilized */
 	if (vdev_descr->vdev.status != (VIRTIO_CONFIG_S_ACKNOWLEDGE |
 				        VIRTIO_CONFIG_S_DRIVER |
-				        VIRTIO_CONFIG_S_DRIVER_OK)) {
+				        VIRTIO_CONFIG_S_DRIVER_OK | VIRTIO_STATUS_FEATURES_OK)) {
 		LTRACEF("unexpected status %d\n",
 			(int)vdev_descr->vdev.status);
 		return ERR_INVALID_ARGS;
 	}
 
 	return NO_ERROR;
+}
+
+static int virtio_kick_cb(struct vqueue *vq, void *priv)
+{
+	struct tipc_dev *dev = (struct tipc_dev *)priv;
+
+	// kick other side
+	dev->cfg->interrupt_status |= 1;
+	wmb();
+	dev->cfg->queue_notify =
+		dev->queue_cfg[vqueue_id(vq)].device_notify_index;
+
+	return 0;
 }
 
 /*
@@ -909,7 +1005,7 @@ static status_t tipc_dev_probe(struct tipc_dev *dev,
 
 	LTRACEF("%p: descr = %p\n", dev, dscr);
 
-	if (dev->vd.state != VDEV_STATE_RESET)
+	if (dev->state != VDEV_STATE_RESET)
 		return ERR_BAD_STATE;
 
 	ret = validate_descr(dev, dscr);
@@ -920,33 +1016,30 @@ static status_t tipc_dev_probe(struct tipc_dev *dev,
 	/* vring[1] == RX queue (host's TX) */
 	for (vring_cnt = 0; vring_cnt < dscr->vdev.num_of_vrings; vring_cnt++) {
 		struct fw_rsc_vdev_vring *vring = &dscr->vrings[vring_cnt];
+		struct l4virtio_queue_config *qcfg = &dev->queue_cfg[vring_cnt];
+		void *daddr;
+		void *aaddr;
+		void *uaddr;
 
-		/* on archs with 64 bits phys addresses we store top 32 bits of
-		 * vring phys address in 'reserved' field of vring desriptor structure,
-		 * otherwise it set to 0.
-		 */
-		uint64_t pa64 = ((uint64_t)vring->reserved << 32) | vring->da;
 
-		LTRACEF("vring%d: pa 0x%llx align %u num %u nid %u\n",
-			vring_cnt, pa64, vring->align, vring->num,
-			vring->notifyid);
-
-		if (pa64 != (paddr_t)pa64) {
-			ret = ERR_INVALID_ARGS;
-			LTRACEF("unsupported phys address range\n");
+		if (virtio_dev_to_kvaddr(dev, qcfg->desc_addr, 0, &daddr))
 			goto err_vq_init;
-		}
 
-		ret = vqueue_init(&dev->vqs[vring_cnt],
-				  vring->notifyid, (paddr_t)pa64,
-				  vring->num, vring->align, dev,
-				  notify_cbs[vring_cnt], NULL);
+		if (virtio_dev_to_kvaddr(dev, qcfg->avail_addr, 0, &aaddr))
+			goto err_vq_init;
+
+		if (virtio_dev_to_kvaddr(dev, qcfg->used_addr, 0, &uaddr))
+			goto err_vq_init;
+
+		ret = vqueue_init(&dev->vqs[vring_cnt], vring_cnt,
+				  daddr, aaddr, uaddr, vring->num, dev,
+				  notify_cbs[vring_cnt], &virtio_kick_cb);
 		if (ret)
 			goto err_vq_init;
 	}
 
 	/* create rx thread */
-	snprintf(tname, sizeof(tname), "tipc-dev%d-rx", dev->vd.devid);
+	snprintf(tname, sizeof(tname), "tipc-dev%u-rx", dscr->vdev.notifyid);
 	dev->rx_thread =
 		thread_create(tname, tipc_rx_thread_func, dev,
 			      DEFAULT_PRIORITY, DEFAULT_STACK_SIZE);
@@ -956,17 +1049,12 @@ static status_t tipc_dev_probe(struct tipc_dev *dev,
 	}
 
 	/* create tx thread */
-	snprintf(tname, sizeof(tname), "tipc-dev%d-tx", dev->vd.devid);
+	snprintf(tname, sizeof(tname), "tipc-dev%u-tx", dscr->vdev.notifyid);
 	dev->tx_thread =
 		thread_create(tname, tipc_tx_thread_func, dev,
 			      DEFAULT_PRIORITY, DEFAULT_STACK_SIZE);
 	if (dev->tx_thread) {
 		thread_resume(dev->tx_thread);
-	}
-
-	ret = _go_online(dev);
-	if (ret == NO_ERROR) {
-		dev->vd.state = VDEV_STATE_ACTIVE;
 	}
 
 	return ret;
@@ -976,35 +1064,6 @@ err_vq_init:
 		vqueue_destroy(&dev->vqs[vring_cnt]);
 	}
 	return ret;
-}
-
-static status_t tipc_vdev_probe(struct vdev *vd, void *descr)
-{
-	DEBUG_ASSERT(vd);
-	DEBUG_ASSERT(descr);
-
-	struct tipc_dev *dev = vdev_to_dev(vd);
-	return tipc_dev_probe(dev, descr);
-}
-
-static status_t tipc_vdev_kick_vq(struct vdev *vd, uint vqid)
-{
-	DEBUG_ASSERT(vd);
-	struct tipc_dev *dev = vdev_to_dev(vd);
-
-	LTRACEF("devid = %d: vq=%u\n", vd->devid, vqid);
-
-	/* check TX VQ */
-	if (vqid == vqueue_id(&dev->vqs[TIPC_VQ_TX])) {
-		return vqueue_notify(&dev->vqs[TIPC_VQ_TX]);
-	}
-
-	/* check RX VQ */
-	if (vqid == vqueue_id(&dev->vqs[TIPC_VQ_RX])) {
-		return vqueue_notify(&dev->vqs[TIPC_VQ_RX]);
-	}
-
-	return ERR_NOT_FOUND;
 }
 
 static int
@@ -1031,6 +1090,7 @@ tipc_send_data(struct tipc_dev *dev, uint32_t local, uint32_t remote,
 	buf.out_iovs.cnt  = MAX_TX_IOVS;
 	buf.out_iovs.phys = out_phys;
 	buf.out_iovs.iovs = out_iovs;
+
 
 	/* get buffer or wait if needed */
 	do {
@@ -1078,7 +1138,7 @@ tipc_send_data(struct tipc_dev *dev, uint32_t local, uint32_t remote,
 	/* map in provided buffers (Non-secure, no-execute, cached, read-write) */
 	uint map_flags = ARCH_MMU_FLAG_NS | ARCH_MMU_FLAG_PERM_NO_EXECUTE |
 	                 ARCH_MMU_FLAG_CACHED;
-	ret = vqueue_map_iovs(&buf.out_iovs, map_flags);
+	ret = virtio_map_iovs(dev, &buf.out_iovs, map_flags);
 	if (ret == NO_ERROR) {
 		struct tipc_hdr *hdr = buf.out_iovs.iovs[0].base;
 
@@ -1104,7 +1164,7 @@ tipc_send_data(struct tipc_dev *dev, uint32_t local, uint32_t remote,
 			ret += sizeof(struct tipc_hdr);
 		}
 
-		vqueue_unmap_iovs(&buf.out_iovs);
+		virtio_unmap_iovs(&buf.out_iovs);
 	}
 
 done:
@@ -1142,19 +1202,79 @@ tipc_send_buf(struct tipc_dev *dev, uint32_t local, uint32_t remote,
 	                      _send_buf, &ctx, data_len, wait);
 }
 
-static const struct vdev_ops _tipc_dev_ops = {
-	.descr_sz = tipc_descr_size,
-	.get_descr = tipc_get_vdev_descr,
-	.probe = tipc_vdev_probe,
-	.reset = tipc_vdev_reset,
-	.kick_vqueue = tipc_vdev_kick_vq,
-};
+static void virtio_disable_queues(struct tipc_dev *dev)
+{
+	uint i;
+
+	for (i = 0; i < TIPC_VQ_NUM; ++i)
+		dev->vqs[i].vring_addr = 0;
+}
+
+static enum handler_return virtio_handle_irq(void *arg)
+{
+	struct tipc_dev *dev = (struct tipc_dev *)arg;
+	struct tipc_vdev_descr *desc = (struct tipc_vdev_descr *) dev->descr_ptr;
+	uint i;
+	uint32_t cmd = dev->cfg->cmd;
+	uint32_t payload = cmd & ~VIRTIO_L4CMD_MASK;
+	u8 *shadow_status = &desc->vdev.status;
+
+	if (cmd) {
+		switch (cmd & VIRTIO_L4CMD_MASK) {
+			case VIRTIO_L4CMD_SET_STATUS:
+				if (payload == 0) {
+					/* reset */
+					tipc_dev_reset(dev);
+					*shadow_status = 0;
+				} else if (!(*shadow_status & VIRTIO_STATUS_FAILED)) {
+					*shadow_status = payload;
+					if (payload & VIRTIO_STATUS_FAILED) {
+						/* stop device */
+						virtio_disable_queues(dev);
+						dev->state = VDEV_STATE_RESET;
+					} else if (payload == VIRTIO_STATUS_READY) {
+						/* all is well, start up the device */
+						if (tipc_dev_probe(dev, desc) != NO_ERROR) {
+							virtio_disable_queues(dev);
+							*shadow_status |= VIRTIO_STATUS_FAILED;
+						}
+					}
+				}
+				dev->cfg->status = *shadow_status;
+				break;
+			case VIRTIO_L4CMD_CFG_QUEUE:
+				/* check that all queues are still ready */
+				if (payload < TIPC_VQ_NUM
+						&& dev->vqs[payload].vring_addr
+						&& !dev->queue_cfg[payload].ready)
+					dev->state = VDEV_STATE_RESET;
+				break;
+			}
+	}
+
+	/* always kick the queues when the device is ready */
+	if (*shadow_status == VIRTIO_STATUS_READY) {
+		if (dev->state == VDEV_STATE_ACTIVE) {
+			// don't know which queue, so kick them all
+			for (i = 0; i < TIPC_VQ_NUM; ++i)
+				vqueue_notify(dev->vqs + i);
+		} else if (dev->state == VDEV_STATE_GOING_ONLINE) {
+			vqueue_notify(&dev->vqs[TIPC_VQ_TX]);
+		}
+	}
+
+	/* acknowledge interrupt and mark command as done */
+	dev->cfg->cmd = 0;
+
+	return INT_RESCHEDULE;
+}
 
 status_t create_tipc_device(const struct tipc_vdev_descr *descr, size_t size,
                             const uuid_t *uuid, struct tipc_dev **dev_ptr)
 {
 	status_t ret;
 	struct tipc_dev *dev;
+	uint i;
 
 	DEBUG_ASSERT(uuid);
 	DEBUG_ASSERT(descr);
@@ -1165,16 +1285,46 @@ status_t create_tipc_device(const struct tipc_vdev_descr *descr, size_t size,
 		return ERR_NO_MEMORY;
 
 	mutex_init(&dev->ept_lock);
-	dev->vd.ops = &_tipc_dev_ops;
+	dev->state = VDEV_STATE_RESET;
 	dev->uuid = uuid;
 	dev->descr_ptr = descr;
 	dev->descr_size = size;
 	handle_list_init(&dev->handle_list);
 	event_init(&dev->have_handles, false, EVENT_FLAG_AUTOUNSIGNAL);
+	event_init(&dev->rx_retry, false, EVENT_FLAG_AUTOUNSIGNAL);
 
-	ret = virtio_register_device(&dev->vd);
-	if (ret != NO_ERROR)
-		goto err_register;
+	/* init virtio device */
+	dev->cfg = (struct l4virtio_config *) (descr->config_base + 0x80000000);
+	dev->queue_cfg = (struct l4virtio_queue_config *)
+                     &dev->cfg->config[descr->vdev.config_len / 4 + 1];
+	dev->driver_window = (vaddr_t)descr->driver_mem_base + 0x80000000;
+
+	dev->cfg->version = 2;
+	dev->cfg->device_id = descr->vdev.id;
+	dev->cfg->vendor_id = 0x44; // virtio
+	dev->cfg->dev_features_map[0] = descr->vdev.dfeatures;
+	dev->cfg->queue_num_max = 0x200;
+	dev->cfg->num_queues = descr->vdev.num_of_vrings;
+	dev->cfg->queues_offset = (char *)dev->queue_cfg - (char *)dev->cfg;
+
+	// setup queues
+	for (i = 0; i < descr->vdev.num_of_vrings; ++i) {
+		dev->queue_cfg[i].num_max = descr->vrings[i].num;
+		dev->queue_cfg[i].device_notify_index = i;
+	}
+
+	// setup config space
+	// NOT IMPLEMENTED: private tipc dev config space at 0x100;
+
+	// register and enable interrupts
+	mask_interrupt(descr->notify_irq);
+
+	register_int_handler(descr->notify_irq, &virtio_handle_irq, dev);
+
+	unmask_interrupt(descr->notify_irq);
+
+	// write magic to signal that we are ready.
+	dev->cfg->magic = VIRTIO_MMIO_MAGIC;
 
 	if (dev_ptr)
 		*dev_ptr = dev;

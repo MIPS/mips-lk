@@ -161,4 +161,10 @@ bool ipc_is_port(handle_t *handle);
 typedef struct trusty_app trusty_app_t;
 int ipc_port_get_default_name(trusty_app_t *tapp, char* buffer, ssize_t size);
 
+/* kernel-callable interface to syscalls */
+long k_sys_port_create(user_addr_t path, uint32_t num_recv_bufs,
+		       uint32_t recv_buf_size, uint32_t flags);
+long k_sys_connect(const char *path, uint32_t flags);
+long k_sys_accept(uint32_t handle_id, uuid_t *peer_uuid);
+
 #endif

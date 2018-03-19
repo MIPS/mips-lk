@@ -32,7 +32,7 @@
 #include <err.h>
 #include <kernel/thread.h>
 #include <kernel/mutex.h>
-#include <mm.h>
+#include <uapi/mm.h>
 #include <stdlib.h>
 #include <string.h>
 

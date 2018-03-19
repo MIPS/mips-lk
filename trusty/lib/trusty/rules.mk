@@ -38,22 +38,15 @@ MODULE_SRCS := \
 
 ifeq (true,$(call TOBOOL,$(WITH_TRUSTY_IPC)))
 GLOBAL_DEFINES += WITH_TRUSTY_IPC=1
+endif # WITH_TRUSTY_IPC
 
+ifeq (true,$(call TOBOOL,$(WITH_TRUSTY_TIPC_DEV)))
+GLOBAL_DEFINES += WITH_TRUSTY_TIPC_DEV=1
 MODULE_SRCS += \
 	$(LOCAL_DIR)/vqueue.c \
-	$(LOCAL_DIR)/trusty_virtio.c \
-	$(LOCAL_DIR)/tipc_dev.c
-
-ifeq ($(ARCH),$(filter $(ARCH),arm arm64))
-MODULE_SRCS += \
-	$(LOCAL_DIR)/smcall.c
-endif
-
-ifneq (true,$(call TOBOOL,$(WITH_CUSTOM_TRUSTY_IPC_CONFIG)))
-MODULE_SRCS += \
+	$(LOCAL_DIR)/tipc_dev.c \
 	$(LOCAL_DIR)/tipc_config.c
-endif
-endif # WITH_TRUSTY_IPC
+endif # WITH_TRUSTY_TIPC_DEV
 
 GLOBAL_INCLUDES += \
 	$(LOCAL_DIR)/include \

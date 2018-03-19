@@ -74,4 +74,10 @@ int ipc_read_msg(handle_t *chandle, uint32_t msg_id, uint32_t offset,
 int ipc_put_msg(handle_t *chandle, uint32_t msg_id);
 int ipc_send_msg(handle_t *chandle, ipc_msg_kern_t *msg);
 
+/* kernel-callable interface to syscalls */
+long k_sys_send_msg (uint32_t handle, ipc_msg_kern_t *msg);
+long k_sys_get_msg (uint32_t handle, ipc_msg_info_t *msg_info);
+long k_sys_put_msg (uint32_t handle, uint32_t msg_id);
+long k_sys_read_msg(uint32_t handle, uint32_t msg_id, uint32_t offset, ipc_msg_kern_t *msg);
+
 #endif

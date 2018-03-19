@@ -151,8 +151,8 @@ void uthread_test(void)
 
 	TEST_END
 
-	TLOGI("Conditions checked: %d\n", _tests_total);
-	TLOGI("Conditions failed:  %d\n", _tests_failed);
+	TLOGI("Conditions checked: %u\n", _tests_total);
+	TLOGI("Conditions failed:  %u\n", _tests_failed);
 	if (_tests_failed == 0)
 		TLOGI("All tests PASSED\n");
 	else

@@ -32,6 +32,8 @@ typedef struct uuid
 	uint8_t clock_seq_and_node[8];
 } uuid_t;
 
+#define UUID_STR_FORMAT "%08x-%04x-%04x-%02x%02x%02x%02x%02x%02x%02x%02x"
+
 #define ZERO_UUID \
 	{ 0x0, 0x0, 0x0, \
 		{ 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0} }

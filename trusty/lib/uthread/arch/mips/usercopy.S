@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files

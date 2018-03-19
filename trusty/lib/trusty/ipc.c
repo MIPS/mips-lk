@@ -308,11 +308,11 @@ static int port_get_user_port(char* kpath, user_addr_t upath, size_t len)
 	}
 
 	/* copy path from user space */
-	ret = (int) strncpy_from_user(kpath, upath, len);
-	if (ret < 0)
-		return (long) ret;
+	ssize_t slen = strlcpy_from_user(kpath, upath, len);
+	if (slen < 0)
+		return slen;
 
-	if ((uint)ret >= len) {
+	if ((size_t)slen >= len) {
 		/* string is too long */
 		return ERR_INVALID_ARGS;
 	}
@@ -326,8 +326,8 @@ static int port_get_user_port(char* kpath, user_addr_t upath, size_t len)
  *  On success - returns handle id (small integer) for the new port.
  *  On error   - returns negative error code.
  */
-long __SYSCALL sys_port_create(user_addr_t path, uint num_recv_bufs,
-                               size_t recv_buf_size, uint32_t flags)
+long __SYSCALL sys_port_create(user_addr_t path, uint32_t num_recv_bufs,
+			       uint32_t recv_buf_size, uint32_t flags)
 {
 	uthread_t *ut = uthread_get_current();
 	trusty_app_t *tapp = ut->private_data;
@@ -366,6 +366,17 @@ err_install:
 	handle_decref(port_handle);
 err_port_create:
 	return (long) ret;
+}
+
+long k_sys_port_create(user_addr_t path, uint32_t num_recv_bufs,
+		       uint32_t recv_buf_size, uint32_t flags)
+{
+	/* the kernel version relies on path being unset to trigger a call to
+	 * ipc_port_get_default_name rather than copying it from user space */
+	if (path)
+		return ERR_NOT_SUPPORTED;
+
+	return sys_port_create(0, num_recv_bufs, recv_buf_size, flags);
 }
 
 /*
@@ -596,6 +607,16 @@ static void chan_finalize_event(handle_t *chandle, uint32_t event)
 	}
 }
 
+/*
+ *  Returns true if uuid is associated with NS client.
+ */
+bool is_ns_client(const uuid_t *uuid)
+{
+	if (uuid == &zero_uuid)
+		return true;
+
+	return false;
+}
 
 /*
  *  Check if connection to specified port is allowed
@@ -777,7 +798,7 @@ err_find_ports:
 #define DEFAULT_IPC_CONNECT_WARN_TIMEOUT   INFINITE_TIME
 #endif
 
-static long _priv_connect(char *path, uint flags, size_t size)
+static long _priv_connect(char *path, uint32_t flags, size_t size)
 {
 	uthread_t *ut = uthread_get_current();
 	trusty_app_t *tapp = ut->private_data;
@@ -833,7 +854,7 @@ static long _priv_connect(char *path, uint flags, size_t size)
 }
 
 /* kernel space available connect() syscall */
-long k_sys_connect(const char *path, uint flags)
+long k_sys_connect(const char *path, uint32_t flags)
 {
 	char tmp_path[IPC_PORT_PATH_MAX];
 
@@ -842,26 +863,28 @@ long k_sys_connect(const char *path, uint flags)
 		return ERR_INVALID_ARGS;
 	}
 
-	strncpy(tmp_path, path, sizeof(tmp_path));
+	size_t len = strlcpy(tmp_path, path, sizeof(tmp_path));
+	if (len >= sizeof(tmp_path))
+		return (long) ERR_INVALID_ARGS;
+
     return _priv_connect(tmp_path, flags, sizeof(tmp_path));
 }
 
-long __SYSCALL sys_connect(user_addr_t path, uint flags)
+long __SYSCALL sys_connect(user_addr_t path, uint32_t flags)
 {
 	char tmp_path[IPC_PORT_PATH_MAX];
-    int ret;
 
 	if (flags & ~IPC_CONNECT_MASK) {
 		/* unsupported flags specified */
 		return ERR_INVALID_ARGS;
 	}
 
-	ret = (int) strncpy_from_user(tmp_path, path, sizeof(tmp_path));
-	if (ret < 0)
-		return (long) ret;
+	ssize_t slen = strlcpy_from_user(tmp_path, path, sizeof(tmp_path));
+	if (slen < 0)
+		return (long)slen;
 
-	if ((uint)ret >= sizeof(tmp_path))
-		return (long) ERR_INVALID_ARGS;
+	if ((size_t)slen >= sizeof(tmp_path))
+		return (long)ERR_INVALID_ARGS;
 
     return _priv_connect(tmp_path, flags, sizeof(tmp_path));
 }
@@ -954,7 +977,7 @@ err_bad_port_state:
 	return ret;
 }
 
-long __SYSCALL sys_accept(uint32_t handle_id, user_addr_t user_uuid)
+static long _priv_accept(uint32_t handle_id, uuid_t *peer_uuid)
 {
 	uctx_t *ctx = current_uctx();
 	handle_t *phandle = NULL;
@@ -975,16 +998,12 @@ long __SYSCALL sys_accept(uint32_t handle_id, user_addr_t user_uuid)
 	if (ret != NO_ERROR)
 		goto err_install;
 
-	/* copy peer uuid into userspace */
-	ret = copy_to_user(user_uuid, peer_uuid_ptr, sizeof(uuid_t));
-	if (ret != NO_ERROR)
-		goto err_uuid_copy;
+	/* copy uuid @peer_uuid_ptr to caller, it is const */
+	memcpy(peer_uuid, peer_uuid_ptr, sizeof(uuid_t));
 
 	handle_decref(phandle);
 	return (long) new_id;
 
-err_uuid_copy:
-	uctx_handle_remove(ctx, new_id, &chandle);
 err_install:
 	handle_close(chandle);
 err_accept:
@@ -992,15 +1011,50 @@ err_accept:
 	return (long) ret;
 }
 
+long k_sys_accept(uint32_t handle_id, uuid_t *peer_uuid)
+{
+	return _priv_accept(handle_id, peer_uuid);
+}
+
+long __SYSCALL sys_accept(uint32_t handle_id, uuid_t *user_peer_uuid)
+{
+	int ret;
+	handle_id_t new_id;
+	uuid_t _peer_uuid;
+	uuid_t *peer_uuid_ptr = &_peer_uuid;
+
+	/* returns new channel handle */
+	ret = _priv_accept(handle_id, peer_uuid_ptr);
+	if (ret < 0)
+		return (long)ret;
+
+	new_id = (long)ret;
+
+	/* copy peer uuid into userspace */
+	ret = copy_to_user((user_addr_t)user_peer_uuid, peer_uuid_ptr, sizeof(uuid_t));
+	if (ret < 0) {
+		/* uuid copy failed, remove and close new channel handle */
+		uctx_t *ctx = current_uctx();
+		handle_t *chandle = NULL;
+
+		uctx_handle_remove(ctx, new_id, &chandle);
+		handle_close(chandle);
+
+		return (long)ret;
+	}
+
+	return (long)new_id;
+}
+
 #else /* WITH_TRUSTY_IPC */
 
-long __SYSCALL sys_port_create(user_addr_t path, uint num_recv_bufs,
-                               size_t recv_buf_size, uint32_t flags)
+long __SYSCALL sys_port_create(user_addr_t path, uint32_t num_recv_bufs,
+			       uint32_t recv_buf_size, uint32_t flags)
 {
 	return (long) ERR_NOT_SUPPORTED;
 }
 
-long __SYSCALL sys_connect(user_addr_t path, uint flags)
+long __SYSCALL sys_connect(user_addr_t path, uint32_t flags)
 {
 	return (long) ERR_NOT_SUPPORTED;
 }

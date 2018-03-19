@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  * Copyright (C) 2012 The Android Open Source Project
  * All rights reserved.
  *

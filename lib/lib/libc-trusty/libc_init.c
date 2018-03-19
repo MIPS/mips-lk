@@ -42,7 +42,7 @@ static void call_array(void(**list)(void)) {
 }
 
 __NO_RETURN void __libc_init(void *args,
-			int (*slingshot)(void*),
+			int (*slingshot)(void),
 			structors_array_t const * const structors)
 {
 	int ret;
@@ -55,7 +55,8 @@ __NO_RETURN void __libc_init(void *args,
 			__libc_fatal("__cxa_atexit failed\n");
 	}
 
-	exit(slingshot(args));
+	(void)args; // args not implemented
+	exit(slingshot());
 }
 
 /* This function will be called during normal program termination

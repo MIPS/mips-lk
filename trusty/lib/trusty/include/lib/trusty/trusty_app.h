@@ -46,8 +46,10 @@ typedef struct
 	uint32_t	privileges;
 	uint32_t	config_entry_cnt;
 	uint32_t	*config_blob;
-	void*		custom_cfg_ptr;
+	void		*custom_cfg_ptr;
 	uint32_t	*custom_cfg_size;
+	void		*valid_ta_props;
+	uint32_t	valid_ta_props_cnt;
 } trusty_app_props_t;
 
 struct free_map_node {
@@ -95,6 +97,9 @@ void trusty_app_init(void);
 status_t trusty_app_setup_mmio(trusty_app_t *trusty_app,
 		u_int mmio_id, vaddr_t *vaddr, uint32_t size);
 trusty_app_t *trusty_app_find_by_uuid(uuid_t *uuid);
+status_t trusty_app_find_instance_by_uuid(uuid_t *uuid,
+		int (*fn)(trusty_app_t *ta, void *data),
+		void *data, int *fn_ret);
 void trusty_app_forall(void (*fn)(trusty_app_t *ta, void *data), void *data);
 
 typedef struct trusty_app_notifier

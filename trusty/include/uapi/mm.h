@@ -21,8 +21,8 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef __MM_H
-#define __MM_H
+#ifndef __UAPI_MM_H
+#define __UAPI_MM_H
 
 /*
  * Flags for mmap syscall
@@ -34,8 +34,6 @@
  * physically contiguous, read-writable and 4k aligned) for now.
  */
 #define MMAP_FLAG_IO_HANDLE		(0x1 << 0)
-#define MMAP_FLAG_PROT_READ		(0x1 << 1)
-#define MMAP_FLAG_PROT_WRITE		(0x1 << 2)
 
 /**
  * struct dma_pmem - a contiguous physical memory block
@@ -88,4 +86,4 @@ struct dma_pmem {
 #define DMA_FLAG_ALLOW_PARTIAL	(0x1 << 3)
 
 
-#endif /* __MM_H */
+#endif /* __UAPI_MM_H */

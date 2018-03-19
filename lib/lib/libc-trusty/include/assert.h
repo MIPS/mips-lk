@@ -55,7 +55,8 @@
 # define	assert(e)	((e) ? (void)0 : __assert2(__FILE__, __LINE__, __func__, #e))
 #endif
 
-# define	DEBUG_ASSERT(x)	(assert(x))
+#define	DEBUG_ASSERT(e)	(assert(e))
+#define	ASSERT(e)	((e) ? (void)0 : __assert2(__FILE__, __LINE__, __func__, #e))
 
 __BEGIN_CDECLS
 void __assert2(const char *, int, const char *, const char *) __NO_RETURN;

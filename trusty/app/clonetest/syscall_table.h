@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  * Copyright (c) 2013, Google, Inc. All rights reserved
  *
  * Permission is hereby granted, free of charge, to any person obtaining

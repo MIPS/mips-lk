@@ -34,6 +34,7 @@ struct tipc_dev;
  * This ID has to match to the value defined in virtio_ids.h on Linux side
  */
 #define VIRTIO_ID_TIPC			(13)
+#define VIRTIO_ID_L4TRUSTY_IPC		(113)
 
 /*
  * TIPC device supports 2 vqueues: TX and RX
@@ -47,31 +48,27 @@ struct tipc_dev;
  */
 #define TIPC_MAX_DEV_NAME_LEN		(32)
 
-/*
- *  Trusty IPC device configuration shared with linux side
- */
-struct tipc_dev_config {
-	uint32_t msg_buf_max_size;  /* max msg size that this device can handle */
-	uint32_t msg_buf_alignment; /* required msg alignment (PAGE_SIZE) */
-	char     dev_name[TIPC_MAX_DEV_NAME_LEN]; /* NS device node name  */
-} __PACKED;
-
 struct tipc_vdev_descr {
 	struct fw_rsc_hdr		hdr;
 	struct fw_rsc_vdev		vdev;
 	struct fw_rsc_vdev_vring	vrings[TIPC_VQ_NUM];
-	struct tipc_dev_config		config;
+	void *config_base;
+	void *driver_mem_base;
+	size_t driver_mem_size;
+	void *shared_mem_base;
+	size_t shared_mem_size;
+	uint16_t notify_irq;
 } __PACKED;
 
 
 #define DECLARE_TIPC_DEVICE_DESCR(_nm, _nid, _txvq_sz, _rxvq_sz, _nd_name) \
-static const struct tipc_vdev_descr _nm = {                          \
+static struct tipc_vdev_descr _nm = {                          \
 	.hdr.type	= RSC_VDEV,                                  \
 	.vdev		= {                                          \
-		.id		= VIRTIO_ID_TIPC,                    \
+		.id		= VIRTIO_ID_L4TRUSTY_IPC,            \
 		.notifyid	= _nid,                              \
 		.dfeatures	= 0,                                 \
-		.config_len	= sizeof(struct tipc_dev_config),    \
+		.config_len	= 0,                                 \
 		.num_of_vrings	= TIPC_VQ_NUM,                       \
 	},                                                           \
 	.vrings	= {                                                  \
@@ -86,11 +83,6 @@ static const struct tipc_vdev_descr _nm = {                          \
 			.notifyid	= 2,                         \
 		},                                                   \
 	},                                                           \
-	.config = {                                                  \
-		.msg_buf_max_size  = PAGE_SIZE,                      \
-		.msg_buf_alignment = PAGE_SIZE,                      \
-		.dev_name = _nd_name                                 \
-	}                                                            \
 };                                                                   \
 
 
@@ -100,6 +92,9 @@ static const struct tipc_vdev_descr _nm = {                          \
 status_t create_tipc_device(const struct tipc_vdev_descr *descr, size_t descr_sz,
                             const uuid_t *uuid, struct tipc_dev **dev_ptr);
 
+
+int tipc_dev_to_phys(paddr_t da, size_t size, paddr_t *pa);
+bool tipc_shm_paddr_within_range(paddr_t pa, size_t size);
 
 /*
  *  Check if uuid belongs to NS client

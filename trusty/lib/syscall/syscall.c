@@ -45,7 +45,7 @@ long sys_undefined(int num)
 #ifdef WITH_SYSCALL_TABLE
 
 /* Generate weak function definitions that can be overridden */
-#define DEF_SYSCALL(nr, fn, rtype, nr_args, ...) __WEAK rtype sys_##fn(void) \
+#define DEF_SYSCALL(nr, fn, rtype, nr_args, ...) __WEAK long sys_##fn(void) \
 	{ \
 		return sys_undefined((nr)); \
 	}

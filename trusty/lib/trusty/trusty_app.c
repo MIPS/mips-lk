@@ -80,6 +80,17 @@ typedef struct trusty_app_manifest {
 
 #define PAGE_MASK		(PAGE_SIZE - 1)
 
+/* Session Manager UUID. It has to be kept in sync with changes to SM UUID in
+ * appropriate manifest file.
+ * The definition here is used that so any tampering with SM_UUID that could
+ * affect checks in this file can be prevented.
+ */
+#ifdef SM_UUID
+#undef SM_UUID
+#endif
+#define SM_UUID { 0x7ea5ad73, 0xd8eb, 0x4859, \
+                  { 0xa2, 0x06, 0x17, 0x46, 0xd3, 0xc4, 0xcc, 0xdf } }
+
 static u_int trusty_app_count;
 static struct list_node trusty_app_list = LIST_INITIAL_VALUE(trusty_app_list);
 
@@ -95,10 +106,11 @@ static mutex_t apps_lock = MUTEX_INITIAL_VALUE(apps_lock);
 static struct list_node app_notifier_list = LIST_INITIAL_VALUE(app_notifier_list);
 uint als_slot_cnt;
 static struct list_node started_app_list = LIST_INITIAL_VALUE(started_app_list);
+static bool session_manager_started = 0;
 
 #define PRINT_TRUSTY_APP_UUID(tid,u)					\
 	dprintf(SPEW,							\
-		"trusty_app %d uuid: 0x%x 0x%x 0x%x 0x%x%x 0x%x%x%x%x%x%x\n",\
+		"trusty_app %d uuid: " UUID_STR_FORMAT "\n",		\
 		tid,							\
 		(u)->time_low, (u)->time_mid,				\
 		(u)->time_hi_and_version,				\
@@ -112,6 +124,8 @@ static struct list_node started_app_list = LIST_INITIAL_VALUE(started_app_list);
 		(u)->clock_seq_and_node[7]);
 
 static status_t trusty_app_init_one(const char *name, trusty_app_t *trusty_app);
+static inline bool trusty_app_is_dead(trusty_app_t *trusty_app);
+static inline bool trusty_app_is_started(trusty_app_t *trusty_app);
 
 static void finalize_registration(void)
 {
@@ -185,8 +199,10 @@ static void trusty_app_free(trusty_app_t *trusty_app)
 {
 	THREAD_LOCK(state);
 	list_delete(&trusty_app->trusty_app_node);
-	if (!trusty_app->is_parent)
-		list_delete(&trusty_app->cloned_node);
+	if (!trusty_app->is_parent) {
+		if (list_in_list(&trusty_app->cloned_node))
+			list_delete(&trusty_app->cloned_node);
+	}
 	free(trusty_app);
 	THREAD_UNLOCK(state);
 }
@@ -205,14 +221,15 @@ __NO_INLINE static void dump_trusty_app_list(void)
 	THREAD_UNLOCK(state);
 }
 
-static void load_app_config_options(intptr_t trusty_app_image_addr,
+static status_t load_app_config_options(intptr_t trusty_app_image_addr,
 		trusty_app_t *trusty_app, Elf32_Shdr *shdr)
 {
-	char  *manifest_data;
+	trusty_app_manifest_t *manifest_data;
 	u_int config_blob_size;
 	uint32_t *config_blob;
 	uint32_t config_cnt;
-	u_int trusty_app_idx;
+	__UNUSED u_int trusty_app_idx;
+	bool not_session_manager;
 
 	/* have to at least have a valid UUID */
 	ASSERT(shdr->sh_size >= sizeof(uuid_t));
@@ -226,24 +243,36 @@ static void load_app_config_options(intptr_t trusty_app_image_addr,
 
 	trusty_app_idx = trusty_app_index(trusty_app);
 
-	manifest_data = (char *)(trusty_app_image_addr + shdr->sh_offset);
+	manifest_data = (trusty_app_manifest_t*)(trusty_app_image_addr +
+			shdr->sh_offset);
 
-	memcpy(&trusty_app->props.uuid,
-	       (uuid_t *)manifest_data,
-	       sizeof(uuid_t));
+	memcpy(&trusty_app->props.uuid, &manifest_data->uuid, sizeof(uuid_t));
+	/* Ensure UUID is different than zero */
+	if (!memcmp(&trusty_app->props.uuid, &zero_uuid, sizeof(uuid_t)))
+		return ERR_INVALID_ARGS;
+
+	not_session_manager = memcmp(&trusty_app->props.uuid, &(const uuid_t)SM_UUID,
+	                             sizeof(trusty_app->props.uuid));
+	/* Ensure there is only one Session Manager in the system. */
+	if (!not_session_manager) {
+	    if (session_manager_started) {
+			dprintf(SPEW, "WARNING: Session Manager already started!\n");
+			return ERR_ALREADY_STARTED;
+		} else {
+			session_manager_started = 1;
+		}
+	}
 
 	PRINT_TRUSTY_APP_UUID(trusty_app_idx, &trusty_app->props.uuid);
 
-	manifest_data += sizeof(trusty_app->props.uuid);
-
-	config_blob = (uint32_t *)manifest_data;
+	config_blob = manifest_data->config_options;
 	config_blob_size = (shdr->sh_size - sizeof(uuid_t));
 
 	trusty_app->props.config_entry_cnt = config_blob_size / sizeof (u_int);
 
 	/* if no config options we're done */
 	if (trusty_app->props.config_entry_cnt == 0) {
-		return;
+		return NO_ERROR;
 	}
 
 	/* save off configuration blob start so it can be accessed later */
@@ -286,6 +315,11 @@ static void load_app_config_options(intptr_t trusty_app_image_addr,
 		case TRUSTY_APP_CONFIG_KEY_PRIVILEGES:
 			/* PRIVILEGES takes 1 data value */
 			trusty_app->props.privileges = val[0];
+			/* Only Session Manager has the highest privilege.
+			 * ensure that the normal TAs have lower privilege than SM.
+			 */
+			if (not_session_manager && (trusty_app->props.privileges > 1))
+			    trusty_app->props.privileges = 0;
 			break;
 		default:
 			dprintf(CRITICAL, "Unknown manifest config key: %d\n",
@@ -303,6 +337,7 @@ static void load_app_config_options(intptr_t trusty_app_image_addr,
 	dprintf(SPEW, "trusty_app %p: num_io_mem=%d\n", trusty_app,
 		trusty_app->props.map_io_mem_cnt);
 #endif
+	return NO_ERROR;
 }
 
 static status_t free_map_list_insert(trusty_app_t *trusty_app, void* ptr)
@@ -363,7 +398,8 @@ static status_t alloc_address_map(trusty_app_t *trusty_app)
 	Elf32_Ehdr *elf_hdr = trusty_app->app_img;
 	void *trusty_app_image;
 	Elf32_Phdr *prg_hdr;
-	u_int i, trusty_app_idx;
+	u_int i;
+	__UNUSED u_int trusty_app_idx;
 	status_t ret;
 	vaddr_t start_code = ~0;
 	vaddr_t start_data = 0;
@@ -382,7 +418,7 @@ static status_t alloc_address_map(trusty_app_t *trusty_app)
 	for (i = 0; i < elf_hdr->e_phnum; i++) {
 		vaddr_t first, last, last_mem;
 
-		prg_hdr = (Elf32_Phdr *)(trusty_app_image + elf_hdr->e_phoff +
+		prg_hdr = (Elf32_Phdr *)((uint8_t *)trusty_app_image + elf_hdr->e_phoff +
 				(i * sizeof(Elf32_Phdr)));
 
 #if DEBUG_LOAD_TRUSTY_APP
@@ -410,7 +446,7 @@ static status_t alloc_address_map(trusty_app_t *trusty_app)
 		       !(prg_hdr->p_offset & PAGE_MASK));
 
 		size_t size = (prg_hdr->p_memsz + PAGE_MASK) & ~PAGE_MASK;
-		void *seg_vaddr = trusty_app_image + prg_hdr->p_offset;
+		void *seg_vaddr = (uint8_t *)trusty_app_image + prg_hdr->p_offset;
 		paddr_t paddr = vaddr_to_paddr(seg_vaddr);
 		vaddr_t vaddr = prg_hdr->p_vaddr;
 		u_int flags = PF_TO_UTM_FLAGS(prg_hdr->p_flags) | UTM_FIXED;
@@ -479,7 +515,7 @@ static status_t alloc_address_map(trusty_app_t *trusty_app)
 		/* end of brk */
 		last_mem = prg_hdr->p_vaddr + prg_hdr->p_memsz;
 		if (last_mem > trusty_app->start_brk) {
-			void *segment_start = trusty_app_image + prg_hdr->p_offset;
+			void *segment_start = (uint8_t *)trusty_app_image + prg_hdr->p_offset;
 
 			trusty_app->start_brk = last_mem;
 			/* make brk consume the rest of the page */
@@ -489,7 +525,7 @@ static status_t alloc_address_map(trusty_app_t *trusty_app)
 			 * do it here (instead of init_brk) so we don't
 			 * have to keep track of the kernel address of
 			 * the mapping where brk starts */
-			memset(segment_start + prg_hdr->p_memsz, 0,
+			memset((uint8_t *)segment_start + prg_hdr->p_memsz, 0,
 			       size - prg_hdr->p_memsz);
 		}
 	}
@@ -509,7 +545,8 @@ static status_t alloc_address_map(trusty_app_t *trusty_app)
 	dprintf(SPEW, "trusty_app %d: brk:  start 0x%08lx end 0x%08lx\n",
 		trusty_app_idx, trusty_app->start_brk, trusty_app->end_brk);
 
-	dprintf(SPEW, "trusty_app %d: entry 0x%08lx\n", trusty_app_idx, trusty_app->ut->entry);
+	dprintf(SPEW, "trusty_app %d: ta %p entry 0x%08lx\n",
+		trusty_app_idx, trusty_app, trusty_app->ut->entry);
 
 	return NO_ERROR;
 }
@@ -567,6 +604,7 @@ static char *align_next_app(Elf32_Ehdr *elf_hdr, Elf32_Shdr *pad_hdr,
  */
 static void trusty_app_bootloader(void)
 {
+	int ret = NO_ERROR;
 	Elf32_Ehdr *ehdr;
 	Elf32_Shdr *shdr;
 	Elf32_Shdr *bss_shdr, *bss_pad_shdr, *manifest_shdr;
@@ -637,8 +675,12 @@ static void trusty_app_bootloader(void)
 		ASSERT((bss_shdr->sh_offset + bss_shdr->sh_size) <= trusty_app_max_extent);
 		memset((uint8_t *)trusty_app_image_addr + bss_shdr->sh_offset, 0, bss_shdr->sh_size);
 
-		load_app_config_options((intptr_t)trusty_app_image_addr, trusty_app, manifest_shdr);
+		ret = load_app_config_options((intptr_t)trusty_app_image_addr, trusty_app, manifest_shdr);
 		trusty_app->app_img = ehdr;
+
+		/* If there was an error loading trusty app, unload it. */
+		if (ret != NO_ERROR)
+			trusty_app_free(trusty_app);
 
 		/* align next trusty_app start */
 		trusty_app_image_addr = align_next_app(ehdr, bss_pad_shdr, trusty_app_max_extent);
@@ -750,11 +792,19 @@ void trusty_app_init(void)
 	{
 		char name[THREAD_NAME_LEN];
 
-		snprintf(name, sizeof(name), "trusty_app_%d_%08x-%04x-%04x",
+		snprintf(name, sizeof(name), "trusty_app_%u_" UUID_STR_FORMAT,
 			 i,
 			 trusty_app->props.uuid.time_low,
 			 trusty_app->props.uuid.time_mid,
-			 trusty_app->props.uuid.time_hi_and_version);
+			 trusty_app->props.uuid.time_hi_and_version,
+			 trusty_app->props.uuid.clock_seq_and_node[0],
+			 trusty_app->props.uuid.clock_seq_and_node[1],
+			 trusty_app->props.uuid.clock_seq_and_node[2],
+			 trusty_app->props.uuid.clock_seq_and_node[3],
+			 trusty_app->props.uuid.clock_seq_and_node[4],
+			 trusty_app->props.uuid.clock_seq_and_node[5],
+			 trusty_app->props.uuid.clock_seq_and_node[6],
+			 trusty_app->props.uuid.clock_seq_and_node[7]);
 
 		i++;
 		ret = trusty_app_init_one(name, trusty_app);
@@ -764,6 +814,15 @@ void trusty_app_init(void)
 	THREAD_UNLOCK(state);
 }
 
+/*
+ * Iterate by uuid over all trusty_app parent instances; cloned apps are
+ * skipped; dead apps are NOT skipped.
+ *
+ * NOTE: the matched trusty_app may be reaped by trusty_exit_handler at any
+ * time.
+ *
+ * return: the matched *trusty_app; otherwise NULL.
+ */
 trusty_app_t *trusty_app_find_by_uuid(uuid_t *uuid)
 {
 	trusty_app_t *ta;
@@ -773,7 +832,7 @@ trusty_app_t *trusty_app_find_by_uuid(uuid_t *uuid)
 	list_for_every_entry(&trusty_app_list, ta, trusty_app_t,
 			trusty_app_node)
 	{
-		// search parent apps; cloned app uuid are duplicates
+		/* search parent apps; cloned app uuid are duplicates */
 		if (!ta->is_parent)
 			continue;
 		if (!memcmp(&ta->props.uuid, uuid, sizeof(uuid_t)))
@@ -784,7 +843,59 @@ trusty_app_t *trusty_app_find_by_uuid(uuid_t *uuid)
 	return NULL;
 }
 
-/* rather export trusty_app_list?  */
+/*
+ * Iterate by uuid over all trusty_app parent and cloned instances; dead apps
+ * are skipped.
+ *
+ * The callback fn is called for each match and if fn returns anything
+ * other than 0 we break out and return this value in fn_ret.
+ *
+ * NOTE: the callback fn is called under THREAD_LOCK so that it may safely
+ * access the trusty_app exclusively from trusty_exit_handler.
+ *
+ * @ret: set to ERR_NOT_FOUND if the uuid doesn't match; otherwise NO_ERROR.
+ * @fn_ret: only valid if @ret is NO_ERROR, @fn_ret is set by callback fn.
+ */
+status_t trusty_app_find_instance_by_uuid(uuid_t *uuid,
+		int (*fn)(trusty_app_t *ta, void *data),
+		void *data, int *fn_ret)
+{
+	status_t ret = ERR_NOT_FOUND;
+	trusty_app_t *parent_app;
+	trusty_app_t *child_app;
+
+	THREAD_LOCK(state);
+
+	/* first match parent app */
+	parent_app = trusty_app_find_by_uuid(uuid);
+	if (!parent_app)
+		goto exit_unlock;
+
+	if (!trusty_app_is_dead(parent_app)) {
+		ret = NO_ERROR;
+		*fn_ret = fn(parent_app, data);
+		if (*fn_ret)
+			goto exit_unlock;
+	}
+
+	/* then search cloned children */
+	list_for_every_entry(&parent_app->cloned_child_list, child_app,
+			trusty_app_t, cloned_node)
+	{
+		if (!trusty_app_is_dead(child_app)) {
+			ret = NO_ERROR;
+			*fn_ret = fn(child_app, data);
+			if (*fn_ret)
+				goto exit_unlock;
+		}
+	}
+
+exit_unlock:
+	THREAD_UNLOCK(state);
+
+	return ret;
+}
+
 void trusty_app_forall(void (*fn)(trusty_app_t *ta, void *data), void *data)
 {
 	trusty_app_t *ta;
@@ -892,16 +1003,24 @@ static status_t trusty_app_clone(trusty_app_t *parent_app, trusty_app_t **ta_clo
 		return ret;
 
 	u_int trusty_app_idx = trusty_app_index(clone_app);
-	snprintf(name, sizeof(name), "TA%010d_%08x-%04x-%04x",
+	snprintf(name, sizeof(name), "TA%010u_" UUID_STR_FORMAT,
 		 trusty_app_idx,
 		 clone_app->props.uuid.time_low,
 		 clone_app->props.uuid.time_mid,
-		 clone_app->props.uuid.time_hi_and_version);
+		 clone_app->props.uuid.time_hi_and_version,
+		 clone_app->props.uuid.clock_seq_and_node[0],
+		 clone_app->props.uuid.clock_seq_and_node[1],
+		 clone_app->props.uuid.clock_seq_and_node[2],
+		 clone_app->props.uuid.clock_seq_and_node[3],
+		 clone_app->props.uuid.clock_seq_and_node[4],
+		 clone_app->props.uuid.clock_seq_and_node[5],
+		 clone_app->props.uuid.clock_seq_and_node[6],
+		 clone_app->props.uuid.clock_seq_and_node[7]);
 
 	ret = trusty_app_init_one(name, clone_app);
 	if (ret) {
 		trusty_app_exit(clone_app);
-		clone_app = NULL;
+		return ret;
 	}
 
 	THREAD_LOCK(state);
@@ -936,7 +1055,9 @@ static status_t trusty_app_restart(trusty_app_t *parent_app, trusty_app_t **ta_c
 		// check if at least one ta instance is started but not dead
 		list_for_every_entry( &ta->cloned_child_list, child_app,
 				trusty_app_t, cloned_node) {
-			if (child_app->started && !child_app->dead) {
+			if (trusty_app_is_started(child_app) &&
+					!trusty_app_is_dead(child_app)) {
+				*ta_clone = child_app;
 				ret = ERR_ALREADY_STARTED;
 				goto release;
 			}
@@ -1114,7 +1235,7 @@ static int trusty_exit_handler(void *arg)
 {
 	int ret;
 
-        dprintf(SPEW, "starting trusty_exit_handler\n");
+	dprintf(SPEW, "starting trusty_exit_handler\n");
 
 	for (;;) {
 		struct trusty_app *trusty_app;
@@ -1124,9 +1245,9 @@ static int trusty_exit_handler(void *arg)
 		list_for_every_entry_safe(&started_app_list, trusty_app, temp,
 				struct trusty_app, started_node) {
 			int thread_ret;
-			char name[THREAD_NAME_LEN] = {0};
+			__UNUSED char name[THREAD_NAME_LEN] = {0};
 			if (LK_DEBUGLEVEL == SPEW)
-				strncpy(name, trusty_app->kt->name, sizeof(name));
+				strlcpy(name, trusty_app->kt->name, sizeof(name));
 
 			ret = thread_join(trusty_app->kt, &thread_ret, 0);
 			switch (ret) {
@@ -1157,14 +1278,14 @@ static int trusty_exit_handler(void *arg)
 			}
 		}
 		THREAD_UNLOCK(state);
-		thread_sleep(100);
+		thread_sleep(10);
 	}
 }
 
 static void start_exit_handler(uint level)
 {
 	thread_detach_and_resume(thread_create("trusty_exit_handler",
-				&trusty_exit_handler, NULL, DEFAULT_PRIORITY,
+				&trusty_exit_handler, NULL, HIGH_PRIORITY,
 				DEFAULT_STACK_SIZE));
 }
 

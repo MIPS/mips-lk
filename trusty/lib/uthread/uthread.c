@@ -28,6 +28,9 @@
 #include <assert.h>
 #include <lk/init.h>
 #include <trace.h>
+#ifdef WITH_TRUSTY_TIPC_DEV
+#include <lib/trusty/tipc_dev.h>
+#endif
 
 #include <kernel/mutex.h>
 
@@ -51,7 +54,6 @@ static inline void mmap_unlock(uthread_t *ut)
 	DEBUG_ASSERT(ut);
 	mutex_release(&ut->mmap_lock);
 }
-
 
 /* TODO: implement a utid hashmap */
 static uint32_t uthread_alloc_utid(void)
@@ -367,10 +369,10 @@ void uthread_kill(uthread_t *ut, int retcode)
 	thread_t *thread;
 
 	DEBUG_ASSERT(ut);
-	DEBUG_ASSERT(ut->thread);
 	if (!ut)
 		return;
 
+	DEBUG_ASSERT(ut->thread);
 	thread = ut->thread;
 	uthread_destroy(ut);
 	thread_kill(thread, retcode);
@@ -549,12 +551,27 @@ static inline void mmap_unlock_pair (uthread_t *source, uthread_t *target)
 		mmap_unlock(target);
 }
 
+static void translate_virt_to_phys_locked(uthread_map_t *mp,
+		vaddr_t vaddr, paddr_t *paddr)
+{
+	u_int offset = vaddr & (PAGE_SIZE -1);
+
+	if (mp->flags & UTM_PHYS_CONTIG) {
+		*paddr = mp->pfn_list[0] + (vaddr - mp->vaddr);
+	} else {
+		uint32_t pg = (vaddr - mp->vaddr) / PAGE_SIZE;
+		*paddr = mp->pfn_list[pg] + offset;
+	}
+}
+
 status_t uthread_virt_to_phys_flags(uthread_t *ut, vaddr_t vaddr,
 		paddr_t *paddr, u_int *flags)
 {
 	uthread_map_t *mp;
-	u_int offset = vaddr & (PAGE_SIZE -1);
 	status_t err;
+
+	if (!ut)
+		return ERR_INVALID_ARGS;
 
 	mmap_lock(ut);
 	mp = uthread_map_find(ut, vaddr, 0);
@@ -563,12 +580,8 @@ status_t uthread_virt_to_phys_flags(uthread_t *ut, vaddr_t vaddr,
 		goto err_out;
 	}
 
-	if (mp->flags & UTM_PHYS_CONTIG) {
-		*paddr = mp->pfn_list[0] + (vaddr - mp->vaddr);
-	} else {
-		uint32_t pg = (vaddr - mp->vaddr) / PAGE_SIZE;
-		*paddr = mp->pfn_list[pg] + offset;
-	}
+	translate_virt_to_phys_locked(mp, vaddr, paddr);
+
 	if (flags)
 		*flags = mp->flags;
 
@@ -583,70 +596,59 @@ status_t uthread_virt_to_phys(uthread_t *ut, vaddr_t vaddr, paddr_t *paddr)
 	return uthread_virt_to_phys_flags(ut, vaddr, paddr, NULL);
 }
 
-status_t uthread_grant_pages(uthread_t *ut_target, ext_vaddr_t vaddr_src,
-		size_t size, u_int flags, vaddr_t *vaddr_target, bool ns_src,
-		uint64_t *ns_page_list)
+status_t uthread_virt_to_kvaddr(uthread_t *ut, vaddr_t vaddr, void **kvaddr)
+{
+	status_t err;
+	paddr_t paddr;
+
+	err = uthread_virt_to_phys_flags(ut, vaddr, &paddr, NULL);
+	if (err)
+		return err;
+
+	*kvaddr = paddr_to_kvaddr(paddr);
+
+	return NO_ERROR;
+}
+
+static status_t translate_ns_src(vaddr_t vaddr, size_t size, paddr_t *paddr)
+{
+#if WITH_TRUSTY_TIPC_DEV
+	return tipc_dev_to_phys(vaddr, size, paddr);
+#else
+	return ERR_NOT_SUPPORTED;
+#endif
+}
+
+status_t uthread_grant_pages(uthread_t *ut_target, uthread_t *ut_src,
+		ext_vaddr_t vaddr_src, size_t size, u_int flags,
+		vaddr_t *vaddr_target, bool ns_src)
 {
 	u_int align, npages;
-	paddr_t *pfn_list;
+	paddr_t *pfn_list = NULL;
 	status_t err;
 	u_int offset;
+	u_int pg;
 
-	if (size == 0) {
-		*vaddr_target = 0;
-		return 0;
-	}
+	/* Size is allowed to be zero and must return a non-NULL ptr */
+	if (size == 0)
+		size = 1;
 
-	uthread_t *ut_src = ns_src ? NULL : uthread_get_current();
+	if (ns_src)
+		assert(!ut_src);
+	else
+		assert(ut_src);
 
 	mmap_lock_pair(ut_src, ut_target);
 
 	offset = vaddr_src & (PAGE_SIZE -1);
 	vaddr_src = ROUNDDOWN(vaddr_src, PAGE_SIZE);
 
-	if (ns_src) {
-		if (!ns_page_list) {
-			err = ERR_INVALID_ARGS;
-			goto err_out;
-		}
-
-		align = UT_MAP_ALIGN_DEFAULT;
-		flags |= UTM_NS_MEM;
-	} else {
-		uthread_map_t *mp_src;
-
-		/* ns_page_list should only be passes for NS src -> secure target
-		 * mappings
-		 */
-		ASSERT(!ns_page_list);
-
-		/* Only a vaddr_t sized vaddr_src is supported
-		 * for secure src -> secure target mappings.
-		 */
-		ASSERT(vaddr_src == (vaddr_t)vaddr_src);
-		mp_src = uthread_map_find(ut_src, (vaddr_t)vaddr_src, size);
-		if (!mp_src) {
-			err = ERR_INVALID_ARGS;
-			goto err_out;
-		}
-
-		if (mp_src->flags & UTM_NS_MEM)
-			flags = flags | UTM_NS_MEM;
-
-		align = mp_src->align;
-	}
-
 	size = ROUNDUP((size + offset), PAGE_SIZE);
 
 	npages = size / PAGE_SIZE;
+	ASSERT(npages >= 1);
 	if (npages == 1)
 		flags |= UTM_PHYS_CONTIG;
-
-	*vaddr_target = uthread_find_va_space(ut_target, size, flags, align);
-	if (!(*vaddr_target)) {
-		err = ERR_NO_MEMORY;
-		goto err_out;
-	}
 
 	pfn_list = malloc(npages * sizeof(paddr_t));
 	if (!pfn_list) {
@@ -654,23 +656,72 @@ status_t uthread_grant_pages(uthread_t *ut_target, ext_vaddr_t vaddr_src,
 		goto err_out;
 	}
 
-	/* translate and map */
-	err = arch_uthread_translate_map(ut_target, vaddr_src, *vaddr_target,
-			pfn_list, npages, flags, ns_src, ns_page_list);
+	if (ns_src) {
+		paddr_t paddr;
+		vaddr_t vaddr;
 
-	if (err != NO_ERROR)
-		goto err_free_pfn_list;
+		/* Only a vaddr_t sized vaddr_src is supported */
+		if (vaddr_src != (vaddr_t)vaddr_src) {
+			err = ERR_NO_RESOURCES;
+			goto err_out;
+		}
+		vaddr = (vaddr_t)vaddr_src;
 
-	err = uthread_map_alloc(ut_target, NULL, *vaddr_target, pfn_list,
-			size, flags, align);
+		align = UT_MAP_ALIGN_DEFAULT;
+		flags |= UTM_NS_MEM;
+
+		/* only contiguous ns_src mappings are implemented */
+		assert(flags & UTM_PHYS_CONTIG);
+
+		err = translate_ns_src(vaddr, size, &paddr);
+		if (err)
+			goto err_out;
+
+		for (pg = 0; pg < npages; pg++)
+			pfn_list[pg] = paddr + (PAGE_SIZE * pg);
+
+	} else {
+		uthread_map_t *mp_src;
+		vaddr_t vaddr;
+
+		/* Only a vaddr_t sized vaddr_src is supported
+		 * for secure src -> secure target mappings.
+		 */
+		ASSERT(vaddr_src == (vaddr_t)vaddr_src);
+		vaddr = (vaddr_t)vaddr_src;
+		mp_src = uthread_map_find(ut_src, vaddr, size);
+		if (!mp_src) {
+			err = ERR_INVALID_ARGS;
+			goto err_out;
+		}
+
+		if (mp_src->flags & UTM_NS_MEM)
+			flags |= UTM_NS_MEM;
+
+		align = mp_src->align;
+
+		/* translate the src mapping */
+		for (pg = 0; pg < npages; pg++, vaddr += PAGE_SIZE) {
+
+			paddr_t paddr;
+			translate_virt_to_phys_locked(mp_src, vaddr, &paddr);
+			pfn_list[pg] = paddr;
+
+		}
+	}
+
+	err = uthread_map_locked(ut_target, vaddr_target, pfn_list, size,
+			flags, align);
+	if (err)
+		goto err_out;
 
 	/* Add back the offset after translation and mapping */
 	*vaddr_target += offset;
 
-err_free_pfn_list:
+err_out:
 	if (pfn_list)
 		free(pfn_list);
-err_out:
+
 	mmap_unlock_pair(ut_src, ut_target);
 	return err;
 }

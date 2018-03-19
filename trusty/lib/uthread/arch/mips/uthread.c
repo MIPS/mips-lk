@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  * Copyright (c) 2013, Google Inc. All rights reserved
  * Copyright (c) 2012-2013, NVIDIA CORPORATION. All rights reserved
  *
@@ -168,6 +169,24 @@ void arch_uthread_free(struct uthread *ut)
 	mips_uthread_mmu_free_pgtbl(ut);
 }
 
+static void arch_uthread_mmu_flags(u_int flags, u_int *l1_flags,
+		u_int *l2_flags)
+{
+	// TODO UTM_NS_MEM not supported
+	//l1_flags = (flags & UTM_NS_MEM) ? MMU_MEMORY_L1_PAGETABLE_NON_SECURE : 0;
+	*l1_flags = 0;
+
+	*l2_flags = MMU_NO_PERM | MMU_VALID;
+	if (flags & UTM_R)
+		*l2_flags &= ~MMU_NO_READ;
+	if (flags & UTM_W)
+		*l2_flags |= MMU_DIRTY;
+	if (flags & UTM_X)
+		*l2_flags &= ~MMU_NO_EXEC;
+
+	*l2_flags |= (flags & UTM_IO) ? MMU_UNCACHED : MMU_CACHED;
+}
+
 status_t arch_uthread_map(struct uthread *ut, struct uthread_map *mp)
 {
 	addr_t vaddr, paddr;
@@ -186,18 +205,7 @@ status_t arch_uthread_map(struct uthread *ut, struct uthread_map *mp)
 
 	ASSERT(!(mp->size & PAGE_MASK));
 
-	// TODO UTM_NS_MEM not supported
-	//l1_flags = (mp->flags & UTM_NS_MEM) ? MMU_MEMORY_L1_PAGETABLE_NON_SECURE : 0;
-
-	l2_flags = MMU_NO_PERM | MMU_VALID;
-	if (mp->flags & UTM_R)
-		l2_flags &= ~MMU_NO_READ;
-	if (mp->flags & UTM_W)
-		l2_flags |= MMU_DIRTY;
-	if (mp->flags & UTM_X)
-		l2_flags &= ~MMU_NO_EXEC;
-
-	l2_flags |= (mp->flags & UTM_IO) ? MMU_UNCACHED : MMU_CACHED;
+	arch_uthread_mmu_flags(mp->flags, &l1_flags, &l2_flags);
 
 	for (pg = 0; pg < (mp->size / PAGE_SIZE); pg++) {
 		if (mp->flags & UTM_PHYS_CONTIG)

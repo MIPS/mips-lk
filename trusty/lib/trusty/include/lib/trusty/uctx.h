@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <uthread.h>
 #include <lib/trusty/handle.h>
 
 typedef struct uctx uctx_t;
@@ -50,5 +51,10 @@ uctx_t *current_uctx(void);
 int uctx_handle_install(uctx_t *ctx, handle_t *handle, handle_id_t *id);
 int uctx_handle_remove(uctx_t *ctx, handle_id_t handle_id, handle_t **handle_ptr);
 int uctx_handle_get(uctx_t *ctx, handle_id_t handle_id, handle_t **handle_ptr);
+
+/* kernel-callable interface to syscalls */
+long k_sys_wait(uint32_t handle_id, uevent_t *ev, uint32_t timeout_msecs);
+long k_sys_wait_any(uevent_t *ev, uint32_t timeout_msecs);
+long k_sys_close(uint32_t handle_id);
 
 #endif

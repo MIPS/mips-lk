@@ -48,7 +48,7 @@
 #include <lib/trusty/uctx.h>
 
 /* must be a multiple of sizeof(unsigned long) */
-#define IPC_MAX_HANDLES		64
+#define IPC_MAX_HANDLES		256
 
 struct uctx {
 	unsigned long		inuse[BITMAP_NUM_WORDS(IPC_MAX_HANDLES)];
@@ -271,14 +271,14 @@ int uctx_handle_remove(uctx_t *ctx, handle_id_t handle_id, handle_t **handle_ptr
 /******************************************************************************/
 
 static long _priv_wait(uint32_t handle_id, uevent_t *event,
-				unsigned long timeout_msecs)
+		       uint32_t timeout_msecs)
 {
 	uctx_t *ctx = current_uctx();
 	handle_t *handle;
 	int ret;
 
-	LTRACEF("[%p][%d]: %ld msec\n", uthread_get_current(),
-	                                handle_id, timeout_msecs);
+	LTRACEF("[%p][%d]: %d msec\n", uthread_get_current(),
+				       handle_id, timeout_msecs);
 
 	ret = uctx_handle_get(ctx, handle_id, &handle);
 	if (ret != NO_ERROR)
@@ -306,17 +306,17 @@ out:
 }
 
 /* kernel space sys_wait() */
-long k_sys_wait(uint32_t handle_id, uevent_t *user_event,
-                unsigned long timeout_msecs)
+long k_sys_wait(uint32_t handle_id, uevent_t *ev,
+		uint32_t timeout_msecs)
 {
-	return _priv_wait(handle_id, user_event, timeout_msecs);
+	return _priv_wait(handle_id, ev, timeout_msecs);
 }
 
 /*
  *   wait on single handle specified by handle id
  */
 long __SYSCALL sys_wait(uint32_t handle_id, user_addr_t user_event,
-                        unsigned long timeout_msecs)
+			uint32_t timeout_msecs)
 {
 	uevent_t tmp_event;
 	int ret;
@@ -337,21 +337,20 @@ long __SYSCALL sys_wait(uint32_t handle_id, user_addr_t user_event,
 /*
  *   Wait on any handle existing in user context.
  */
-long __SYSCALL sys_wait_any(user_addr_t user_event, unsigned long timeout_msecs)
+static long _priv_wait_any(uevent_t *ev, uint32_t timeout_msecs)
 {
 	uctx_t *ctx = current_uctx();
 	handle_t *handle;
-	uevent_t tmp_event;
 	int ret;
 
-	LTRACEF("[%p]: %ld msec\n", uthread_get_current(),
-	                            timeout_msecs);
+	LTRACEF("[%p]: %d msec\n", uthread_get_current(),
+				   timeout_msecs);
 
 	/*
 	 * Get a handle that has a pending event. The returned handle has
 	 * extra ref taken.
 	 */
-	ret = handle_list_wait(&ctx->handle_list, &handle, &tmp_event.event,
+	ret = handle_list_wait(&ctx->handle_list, &handle, &ev->event,
 			       timeout_msecs);
 	if (ret < 0) {
 		/* an error or no events (timeout) */
@@ -360,23 +359,41 @@ long __SYSCALL sys_wait_any(user_addr_t user_event, unsigned long timeout_msecs)
 
 	DEBUG_ASSERT(handle); /* there should be a handle */
 
-	tmp_event.handle = _handle_to_id_locked(ctx, handle);
-	tmp_event.cookie = (user_addr_t)(uintptr_t)handle_get_cookie(handle);
+	ev->handle = _handle_to_id_locked(ctx, handle);
+	ev->cookie = (user_addr_t)(uintptr_t)handle_get_cookie(handle);
 
 	/* drop the reference that was taken by wait_any */
 	handle_decref(handle);
 
 	/* there should be a handle id */
-	DEBUG_ASSERT(tmp_event.handle < IPC_MAX_HANDLES);
+	DEBUG_ASSERT(ev->handle < IPC_MAX_HANDLES);
+
+out:
+	LTRACEF("[%p][%d]: ret = %d\n", uthread_get_current(),
+	                                ev->handle, ret);
+	return ret;
+}
+
+long k_sys_wait_any(uevent_t *ev, uint32_t timeout_msecs)
+{
+	return _priv_wait_any(ev, timeout_msecs);
+}
+
+long __SYSCALL sys_wait_any(user_addr_t user_event, uint32_t timeout_msecs)
+{
+	uevent_t tmp_event;
+	long ret;
+
+	ret = _priv_wait_any(&tmp_event, timeout_msecs);
+	if (ret < 0)
+		return ret;
 
 	status_t status = copy_to_user(user_event, &tmp_event, sizeof(tmp_event));
 	if (status) {
 		/* failed to copy, propogate error to caller */
 		ret = status;
 	}
-out:
-	LTRACEF("[%p][%d]: ret = %d\n", uthread_get_current(),
-	                                tmp_event.handle, ret);
+
 	return ret;
 }
 
@@ -393,6 +410,11 @@ long __SYSCALL sys_close(uint32_t handle_id)
 
 	handle_close(handle);
 	return NO_ERROR;
+}
+
+long k_sys_close(uint32_t handle_id)
+{
+	return sys_close(handle_id);
 }
 
 long __SYSCALL sys_set_cookie(uint32_t handle_id, user_addr_t cookie)
@@ -415,12 +437,12 @@ long __SYSCALL sys_set_cookie(uint32_t handle_id, user_addr_t cookie)
 #else  /* WITH_TRUSTY_IPC */
 
 long __SYSCALL sys_wait(uint32_t handle_id, user_addr_t user_event,
-                        unsigned long timeout_msecs)
+			uint32_t timeout_msecs)
 {
 	return (long) ERR_NOT_SUPPORTED;
 }
 
-long __SYSCALL sys_wait_any(user_addr_t user_event, unsigned long timeout_msecs)
+long __SYSCALL sys_wait_any(user_addr_t user_event, uint32_t timeout_msecs)
 {
 	return (long) ERR_NOT_SUPPORTED;
 }

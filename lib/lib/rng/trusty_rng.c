@@ -208,7 +208,7 @@ __WEAK int trusty_rng_hw_rand(uint8_t *data, size_t len)
 		}
 
 		size_t rx_size = (size_t) rc;
-		rx_msg.iov[0].base += rx_size;
+		(uint8_t*)rx_msg.iov[0].base += rx_size;
 		rx_msg.iov[0].len -= rx_size;
 		put_msg(chan, inf.id);
 	}

@@ -402,20 +402,20 @@ static long _priv_send_msg(uint32_t handle_id, msg_desc_t *tmp_msg)
 			handle_notify(&chan->peer->handle);
 		}
 	}
-	mutex_release(&ipc_lock);
+	mutex_release_reschedule(&ipc_lock, false);
 	handle_decref(chandle);
 	return (long) ret;
 
 }
 
 /* kernel space sys_send_msg() */
-long k_sys_send_msg(uint32_t handle_id, ipc_msg_user_t* user_msg)
+long k_sys_send_msg(uint32_t handle_id, ipc_msg_kern_t* msg)
 {
 	msg_desc_t tmp_msg;
 
 	/* copy message descriptor */
 	tmp_msg.type = IPC_MSG_BUFFER_KERNEL;
-	memcpy(&tmp_msg.user, user_msg, sizeof(ipc_msg_user_t));
+	memcpy(&tmp_msg.kern, msg, sizeof(ipc_msg_kern_t));
 
 	return _priv_send_msg(handle_id, &tmp_msg);
 }
@@ -487,9 +487,9 @@ static long _priv_get_msg(uint32_t handle_id, ipc_msg_info_t *msg_info)
 }
 
 /* kernel space sys_get_msg() */
-long k_sys_get_msg(uint32_t handle_id, ipc_msg_info_t *user_msg_info)
+long k_sys_get_msg(uint32_t handle_id, ipc_msg_info_t *msg_info)
 {
-	return _priv_get_msg(handle_id, user_msg_info);
+	return _priv_get_msg(handle_id, msg_info);
 }
 
 long __SYSCALL sys_get_msg(uint32_t handle_id, user_addr_t user_msg_info)
@@ -543,6 +543,11 @@ long __SYSCALL sys_put_msg(uint32_t handle_id, uint32_t msg_id)
 	return (long) ret;
 }
 
+long k_sys_put_msg(uint32_t handle_id, uint32_t msg_id)
+{
+	return sys_put_msg(handle_id, msg_id);
+}
+
 int ipc_put_msg(handle_t *chandle, uint32_t msg_id)
 {
 	int ret;
@@ -587,13 +592,13 @@ static long _priv_read_msg(uint32_t handle_id, uint32_t msg_id, uint32_t offset,
 
 /* kernel space sys_read_msg */
 long k_sys_read_msg(uint32_t handle_id, uint32_t msg_id, uint32_t offset,
-                            ipc_msg_user_t *user_msg)
+                            ipc_msg_kern_t *msg)
 {
 	msg_desc_t tmp_msg;
 
 	/* get msg descriptor */
 	tmp_msg.type = IPC_MSG_BUFFER_KERNEL;
-	memcpy(&tmp_msg.user, user_msg, sizeof(ipc_msg_user_t));
+	memcpy(&tmp_msg.kern, msg, sizeof(ipc_msg_kern_t));
 	return _priv_read_msg(handle_id, msg_id, offset, &tmp_msg);
 }
 

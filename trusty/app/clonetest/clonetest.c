@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -113,7 +114,7 @@ static int print_result(int ret, const char *funcname, int expect)
 
 #define PRINT_APP_NAME_UUID(msg,name,u)					\
 	dprintf(SPEW,							\
-		"%s %s, uuid: 0x%x 0x%x 0x%x 0x%x%x 0x%x%x%x%x%x%x\n",	\
+		"%s %s, uuid: " UUID_STR_FORMAT "\n",			\
 		msg, name,						\
 		(u)->time_low, (u)->time_mid,				\
 		(u)->time_hi_and_version,				\

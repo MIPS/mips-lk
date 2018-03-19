@@ -197,10 +197,13 @@ status_t uthread_virt_to_phys(uthread_t *ut, vaddr_t vaddr, paddr_t *paddr);
 status_t uthread_virt_to_phys_flags(uthread_t *ut, vaddr_t vaddr,
 		paddr_t *paddr, u_int *flags);
 
+/* Translate virtual address to kernel virtual address */
+status_t uthread_virt_to_kvaddr(uthread_t *ut, vaddr_t vaddr, void **kvaddr);
+
 /* Grant pages from current context into target uthread */
-status_t uthread_grant_pages(uthread_t *ut_target, ext_vaddr_t vaddr_src,
-		size_t size, u_int flags, vaddr_t *vaddr_target, bool ns_src,
-		uint64_t *ns_page_list);
+status_t uthread_grant_pages(uthread_t *ut_target, uthread_t *ut_src,
+		ext_vaddr_t vaddr_src, size_t size, u_int flags,
+		vaddr_t *vaddr_target, bool ns_src);
 
 /* Revoke mappings from a previous grant */
 status_t uthread_revoke_pages(uthread_t *ut, vaddr_t vaddr, size_t size);

@@ -17,10 +17,10 @@
 #pragma once
 
 /* Expected limits: should be in sync with kernel settings */
-#define MAX_USER_HANDLES     64    /* max number of user handles */
-#define MAX_PORT_PATH_LEN    64    /* max length of port path name   */
-#define MAX_PORT_BUF_NUM     32    /* max number of per port buffers */
-#define MAX_PORT_BUF_SIZE  4096    /* max size of per port buffer    */
+#define MAX_USER_HANDLES    256    /* IPC_MAX_HANDLES max number of user handles */
+#define MAX_PORT_PATH_LEN    64    /* IPC_PORT_PATH_MAX max length of port path name   */
+#define MAX_PORT_BUF_NUM     32    /* IPC_CHAN_MAX_BUFS max number of per port buffers */
+#define MAX_PORT_BUF_SIZE  4096    /* IPC_CHAN_MAX_BUF_SIZE max size of per port buffer    */
 
 #define TLOGI(fmt, ...) \
     fprintf(stderr, "%s: %d: " fmt, LOG_TAG, __LINE__,  ## __VA_ARGS__)

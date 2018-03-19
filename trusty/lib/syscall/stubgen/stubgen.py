@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# Copyright 2013 Google Inc. +All rights reserved.
+# Copyright 2013-2017 Google Inc. +All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files
@@ -32,8 +32,8 @@ with definitions like this:
 DEF_SYSCALL(nr_syscall, syscall_name, return_type, nr_args, arg_list...)
 
 For e.g.,
-DEF_SYSCALL(0x3, read, 3, int fd, void *buf, int size)
-DEF_SYSCALL(0x4, write, 4, int fd, void *buf, int size)
+DEF_SYSCALL(0x3, read, long, 3, int fd, void *buf, int size)
+DEF_SYSCALL(0x4, write, long, 3, int fd, void *buf, int size)
 
 FUNCTION(read)
     ldr     r12, =__NR_read
@@ -52,11 +52,11 @@ Another file with a enumeration of all syscalls is also generated:
 ...
 
 
-Only syscalls with 4 or less arguments are supported.
+The max number of arguments is architecture specific.
 """
 
 copyright_header = """/*
- * Copyright (c) 2013 Google Inc. All rights reserved
+ * Copyright (c) 2013-2017 Google Inc. All rights reserved
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -101,20 +101,28 @@ FUNCTION(%(sys_fn)s)
 syscall_stub_mips = """
 .section .text.%(sys_fn)s
 FUNCTION(%(sys_fn)s)
+    lw      $t0, 16($sp)
+    lw      $t1, 20($sp)
+    lw      $t2, 24($sp)
+    lw      $t3, 28($sp)
     li      $v0, __NR_%(sys_fn)s
     syscall
     j       $ra
       nop
 """
 
-syscall_arch = {'arm': syscall_stub_arm, 'mips': syscall_stub_mips}
+syscall_stub_arch = {'arm': syscall_stub_arm, 'mips': syscall_stub_mips}
+syscall_nr_arg_arch = {'arm': 4, 'mips': 8}
 
-syscall_define = "#define __NR_%(sys_fn)s\t\t%(sys_nr)s\n"
+syscall_define = "#define __NR_%(sys_fn)-36s\t%(sys_nr)s\n"
 
-syscall_proto = "%(sys_rt)s %(sys_fn)s (%(sys_args)s);\n"
+syscall_proto = "%(sys_rt)s %(sys_fn)s(%(sys_args)s);\n"
 
 asm_ifdef = "\n#ifndef ASSEMBLY\n"
-asm_endif = "\n#endif"
+asm_endif = "\n#endif\n"
+
+beg_cdecls = "\n__BEGIN_CDECLS\n"
+end_cdecls = "\n__END_CDECLS\n"
 
 syscall_def = "DEF_SYSCALL"
 
@@ -126,7 +134,7 @@ syscall_pat = (
     r'\s*(?P<sys_nr_args>\d+)\s*'                # nr ags
     r'('
     r'\)\s*$|'                                   # empty arg list or
-    r',\s*(?P<sys_args>[\w,*\s]+)'               # arg list
+    r',\s*(?P<sys_args>[\w,*\s()]+)'             # arg list
     r'\)\s*$'
     r')')
 
@@ -138,7 +146,7 @@ def perror(line, err_str):
 
 
 
-def parse_check_def(line):
+def parse_check_def(line, max_nr_args):
     """
     Parse a DEF_SYSCALL line and check for errors
     Returns various components from the line.
@@ -151,9 +159,9 @@ def parse_check_def(line):
         sys_args = gd['sys_args']
 
         # check nr args
-        if sys_nr_args > 4:
-            perror(line, "Only syscalls with up to 4 arguments"
-                         "are supported.\n")
+        if sys_nr_args > max_nr_args:
+            perror(line, "Exceeded maximum number of arguments"
+                         "in syscall definition.\n")
             return None
 
         if sys_nr_args > 0:
@@ -192,7 +200,8 @@ def process_table(table_file, std_file, stubs_file, verify, arch):
     define_lines = ""
     proto_lines = "\n"
     stub_lines = ""
-    syscall_stub = syscall_arch[arch]
+    syscall_stub = syscall_stub_arch[arch]
+    max_nr_args = syscall_nr_arg_arch[arch]
 
     tbl = open(table_file, "r")
     for line in tbl:
@@ -203,7 +212,7 @@ def process_table(table_file, std_file, stubs_file, verify, arch):
         if not line.startswith(syscall_def):
             continue
 
-        params = parse_check_def(line)
+        params = parse_check_def(line, max_nr_args)
 
         if params is None:
             sys.exit(2)
@@ -222,8 +231,8 @@ def process_table(table_file, std_file, stubs_file, verify, arch):
     if std_file is not None:
         with open(std_file, "w") as std:
             std.writelines(copyright_header + autogen_header)
-            std.writelines(define_lines + asm_ifdef)
-            std.writelines(proto_lines + asm_endif)
+            std.writelines(define_lines + asm_ifdef + beg_cdecls)
+            std.writelines(proto_lines + end_cdecls + asm_endif)
 
     if stubs_file is not None:
         with open(stubs_file, "w") as stubs:
@@ -250,7 +259,7 @@ def main():
     op.add_option("-a", "--arch", type="string",
             dest="arch", default=None,
             help="Select architecture for assembly stubs. "
-                 "Supported architectures: %s" % syscall_arch.keys())
+                 "Supported architectures: %s" % syscall_stub_arch.keys())
 
     (opts, args) = op.parse_args()
 
@@ -263,7 +272,7 @@ def main():
             op.print_help()
             sys.exit(1)
 
-    if not opts.arch in syscall_arch:
+    if not opts.arch in syscall_stub_arch:
         sys.stderr.write("Unsupported architecture: %s\n\n" % opts.arch)
         op.print_help()
         sys.exit(1)

@@ -267,7 +267,7 @@ static void _hlist_finish_wait_locked(handle_list_t *hlist, handle_t *last)
 static int _hlist_do_poll_locked(handle_list_t *hlist, handle_t **handle_ptr,
 				 uint32_t *event_ptr, bool prepare)
 {
-	int ret;
+	int ret = 0;
 
 	DEBUG_ASSERT(hlist->wait_event);
 

@@ -74,15 +74,12 @@ struct vqueue_buf {
 };
 
 int vqueue_init(struct vqueue *vq, uint32_t id,
-		paddr_t addr, uint num, ulong align,
+		void *desc_addr, void *avail_addr, void *used_addr, uint num,
 		void *priv, vqueue_cb_t notify_cb, vqueue_cb_t kick_cb);
 
 void vqueue_destroy(struct vqueue *vq);
 
 int vqueue_get_avail_buf(struct vqueue *vq, struct vqueue_buf *iovbuf);
-
-int vqueue_map_iovs(struct vqueue_iovs *vqiovs, u_int flags);
-void vqueue_unmap_iovs(struct vqueue_iovs *vqiovs);
 
 int vqueue_add_buf(struct vqueue *vq, struct vqueue_buf *buf, uint32_t len);
 
@@ -100,11 +97,6 @@ static inline int vqueue_notify(struct vqueue *vq)
 	return 0;
 }
 
-static inline int vqueue_kick(struct vqueue *vq)
-{
-	if (vq->kick_cb)
-		return vq->kick_cb(vq, vq->priv);
-	return 0;
-}
+int vqueue_kick(struct vqueue *vq);
 
 #endif /* _LIB_TRUSTY_VQUEUE_H */

@@ -28,7 +28,6 @@
 #include <sys/types.h>
 #include <trace.h>
 
-#include <kernel/vm.h>
 #include <arch/arch_ops.h>
 
 #include <lib/trusty/uio.h>
@@ -41,34 +40,23 @@
 #define VQ_LOCK_FLAGS SPIN_LOCK_FLAG_INTERRUPTS
 
 int vqueue_init(struct vqueue *vq, uint32_t id,
-		paddr_t paddr, uint num, ulong align,
+		void *desc_addr, void *avail_addr, void *used_addr, uint num,
 		void *priv, vqueue_cb_t notify_cb, vqueue_cb_t kick_cb)
 {
-	status_t ret;
-	void   *vptr = NULL;
-
 	DEBUG_ASSERT(vq);
 
-	vq->vring_sz = vring_size(num, align);
-	ret = vmm_alloc_physical(vmm_get_kernel_aspace(), "vqueue",
-	                         ROUNDUP(vq->vring_sz, PAGE_SIZE),
-	                         &vptr,  PAGE_SIZE_SHIFT,
-	                         paddr, 0,
-	                         ARCH_MMU_FLAG_NS | ARCH_MMU_FLAG_PERM_NO_EXECUTE |
-	                         ARCH_MMU_FLAG_CACHED);
-	if (ret != NO_ERROR) {
-		LTRACEF("cannot map vring (%d)\n", ret);
-		free(vq);
-		return (int) ret;
-	}
+	vq->vring_sz = used_addr - desc_addr
+                  + sizeof(uint16_t) * 3 + sizeof(struct vring_used_elem) * num;
 
-	vring_init(&vq->vring, num, vptr, align);
+	vring_init_v1(&vq->vring, num, desc_addr, avail_addr, used_addr);
 
 	vq->id = id;
 	vq->priv = priv;
 	vq->notify_cb = notify_cb;
 	vq->kick_cb = kick_cb;
-	vq->vring_addr = (vaddr_t)vptr;
+	// XXX if vrings are placed in kernel virtual memory then vring_addr
+	// will be needed to free the allocated memory.
+	vq->vring_addr = (vaddr_t) desc_addr;
 
 	event_init(&vq->avail_event, false, 0);
 
@@ -99,7 +87,7 @@ void vqueue_signal_avail(struct vqueue *vq)
 	if (vq->vring_addr)
 		vq->vring.used->flags |= VRING_USED_F_NO_NOTIFY;
 	spin_unlock_restore(&vq->slock, state, VQ_LOCK_FLAGS);
-	event_signal(&vq->avail_event, true);
+	event_signal(&vq->avail_event, false);
 }
 
 /* The other side of virtio pushes buffers into our avail ring, and pulls them
@@ -134,7 +122,7 @@ static int _vqueue_get_avail_buf_locked(struct vqueue *vq,
 	if (vq->last_avail_idx == vq->vring.avail->idx) {
 		event_unsignal(&vq->avail_event);
 		vq->vring.used->flags &= ~VRING_USED_F_NO_NOTIFY;
-		smp_mb();
+		mb();
 		if (vq->last_avail_idx == vq->vring.avail->idx) {
 			/* no buffers left */
 			return ERR_NOT_ENOUGH_BUFFER;
@@ -142,7 +130,7 @@ static int _vqueue_get_avail_buf_locked(struct vqueue *vq,
 		vq->vring.used->flags |= VRING_USED_F_NO_NOTIFY;
 		event_signal(&vq->avail_event, false);
 	}
-	smp_rmb();
+	rmb();
 
 	next_idx = vq->vring.avail->ring[vq->last_avail_idx % vq->vring.num];
 	vq->last_avail_idx++;
@@ -151,8 +139,8 @@ static int _vqueue_get_avail_buf_locked(struct vqueue *vq,
 		/* index of the first descriptor in chain is out of range.
 		   vring is in non recoverable state: we cannot even return
 		   an error to the other side */
-		panic("vq %p: head out of range %u (max %u)\n",
-		       vq, next_idx, vq->vring.num);
+		panic("vq %p: head out of x range %u (max %u) index %d\n",
+		       vq, next_idx, vq->vring.num, (vq->last_avail_idx - 1) % vq->vring.num);
 	}
 
 	iovbuf->head = next_idx;
@@ -169,7 +157,7 @@ static int _vqueue_get_avail_buf_locked(struct vqueue *vq,
 			 * Abort message handling, return an error to the
 			 * other side and let it deal with it.
 			 */
-			LTRACEF("vq %p: head out of range %u (max %u)\n",
+			LTRACEF("vq %p: head out of y range %u (max %u)\n",
 			       vq, next_idx, vq->vring.num);
 			return ERR_NOT_VALID;
 		}
@@ -207,53 +195,6 @@ int vqueue_get_avail_buf(struct vqueue *vq, struct vqueue_buf *iovbuf)
 	return ret;
 }
 
-int vqueue_map_iovs(struct vqueue_iovs *vqiovs, u_int flags)
-{
-	uint  i;
-	int ret;
-
-	DEBUG_ASSERT(vqiovs);
-	DEBUG_ASSERT(vqiovs->phys);
-	DEBUG_ASSERT(vqiovs->iovs);
-	DEBUG_ASSERT(vqiovs->used <= vqiovs->cnt);
-
-	for (i = 0; i < vqiovs->used; i++) {
-        vqiovs->iovs[i].base = NULL;
-		ret = vmm_alloc_physical(vmm_get_kernel_aspace(), "vqueue",
-		                         ROUNDUP(vqiovs->iovs[i].len, PAGE_SIZE),
-		                         &vqiovs->iovs[i].base, PAGE_SIZE_SHIFT,
-		                         vqiovs->phys[i], 0, flags);
-		if (ret)
-			goto err;
-	}
-
-	return NO_ERROR;
-
-err:
-	while (i--) {
-		vmm_free_region(vmm_get_kernel_aspace(),
-		                (vaddr_t)vqiovs->iovs[i].base);
-		vqiovs->iovs[i].base = NULL;
-	}
-	return ret;
-}
-
-void vqueue_unmap_iovs(struct vqueue_iovs *vqiovs)
-{
-	DEBUG_ASSERT(vqiovs);
-	DEBUG_ASSERT(vqiovs->phys);
-	DEBUG_ASSERT(vqiovs->iovs);
-	DEBUG_ASSERT(vqiovs->used <= vqiovs->cnt);
-
-	for (uint i = 0; i < vqiovs->used; i++) {
-		/* base is expected to be set */
-		DEBUG_ASSERT(vqiovs->iovs[i].base);
-		vmm_free_region(vmm_get_kernel_aspace(),
-		                (vaddr_t)vqiovs->iovs[i].base);
-		vqiovs->iovs[i].base = NULL;
-	}
-}
-
 static int _vqueue_add_buf_locked(struct vqueue *vq, struct vqueue_buf *buf, uint32_t len)
 {
 	struct vring_used_elem *used;
@@ -276,8 +217,10 @@ static int _vqueue_add_buf_locked(struct vqueue *vq, struct vqueue_buf *buf, uin
 	used = &vq->vring.used->ring[vq->vring.used->idx % vq->vring.num];
 	used->id = buf->head;
 	used->len = len;
-	smp_wmb();
+	wmb();
 	vq->vring.used->idx++;
+
+	vqueue_kick(vq);
 	return NO_ERROR;
 }
 
@@ -290,3 +233,11 @@ int vqueue_add_buf(struct vqueue *vq, struct vqueue_buf *buf, uint32_t len)
 	spin_unlock_restore(&vq->slock, state, VQ_LOCK_FLAGS);
 	return ret;
 }
+
+int vqueue_kick(struct vqueue *vq)
+{
+	if (vq->kick_cb)
+		return vq->kick_cb(vq, vq->priv);
+	return 0;
+}
+
