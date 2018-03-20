@@ -1,0 +1,25 @@
+The following directories in this repository were initially subtrees tracking
+remote repositories.  The remote references are not automatically restored when
+cloning.
+
+lk/              - https://github.com/travisg/lk.git
+trusty/          - https://android.googlesource.com/trusty/lk/trusty
+app/sample/      - https://android.googlesource.com/trusty/app/sample
+lib/             - https://android.googlesource.com/trusty/lib
+external/headers - https://android.googlesource.com/trusty/external/headers
+
+
+The initial LK setup was achieved using:
+   git remote add -f lk-upstream https://github.com/travisg/lk.git
+   git merge -s ours --no-commit lk-upstream/master
+   git read-tree -u --prefix=lk/ lk-upstream/master
+   git commit
+
+To update LK from upstream:
+   git remote add -f lk-upstream https://github.com/travisg/lk.git
+   git pull -s recursive -X subtree=lk lk-upstream master
+
+
+The Google Trusty directories in this repository where originally obtained from
+the locations shown above and moved into subtrees. The Trusty codebase in this
+repository is no longer actively tracking upstream Trusty changes.

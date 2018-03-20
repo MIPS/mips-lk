@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  * Copyright (c) 2014, STMicroelectronics International N.V.
  * All rights reserved.
  *
@@ -26,147 +27,169 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if WITH_GP_API
-
 #include <stdlib.h>
 #include <uthread.h>
+#include <lib/syscall.h>
 #include <tee_api_types.h>
 #include <lib/tee/tee_api.h>
 #include <tee_api_defines.h>
+#ifdef WITH_TRUSTY_TIPC_DEV
+#include <lib/trusty/tipc_dev.h>
+#endif
 
 #define hidden_copy_from_user(x...) (copy_from_user)(x)
 #define hidden_copy_to_user(x...) (copy_to_user)(x)
 
-status_t tee_mmu_check_access_rights(const struct uthread *utc,
-			       uint32_t flags, user_addr_t uaddr, size_t len)
+/* TODO: 12/25/2017 remove this code if regression is not detected */
+#if 0
+static bool tee_mmu_is_ns_addr_range(paddr_t pa, size_t len)
 {
-	user_addr_t a;
-	size_t addr_incr = PAGE_SIZE;
+#ifdef WITH_TRUSTY_TIPC_DEV
+	/* shared memory region is accessible by non-secure side */
+	return tipc_shm_paddr_within_range(pa, len);
+#else
+	return false;
+#endif
+}
+#endif
+
+status_t mmu_check_access_rights(const struct uthread *ut,
+		uint32_t flags, user_addr_t uaddr, size_t len)
+{
+	u_int offset, npages;
+
+	if (ut == NULL)
+		goto err_exit;
 
 	/* Address wrap */
 	if ((uaddr + len) < uaddr)
-		return ERR_ACCESS_DENIED;
+		goto err_exit;
 
-	/* Protect against increment wrap */
-	if ((uaddr + addr_incr) < uaddr)
-		addr_incr = len;
+	offset = uaddr & (PAGE_SIZE - 1);
+	npages = ROUNDUP((len + offset), PAGE_SIZE) / PAGE_SIZE;
+	if (npages == 0)
+		npages = 1;
 
-	for (a = uaddr; a < (uaddr + len); a += addr_incr) {
+	for (uaddr = ROUNDDOWN(uaddr, PAGE_SIZE); npages > 0;
+	     --npages, uaddr += PAGE_SIZE) {
 		paddr_t pa;
 		u_int uflags;
 		int res;
 
-		res = uthread_virt_to_phys_flags((uthread_t*)utc, (vaddr_t)a,
-				&pa, &uflags);
+		res = uthread_virt_to_phys_flags((uthread_t *)ut,
+				(vaddr_t)uaddr, &pa, &uflags);
 		if (res != NO_ERROR)
-			return ERR_ACCESS_DENIED;
+			goto err_exit;
 
 		if (!(flags & TEE_MEMORY_ACCESS_ANY_OWNER)) {
-#if 1 // MIPS_OPTEE_NOT_YET
-			// TODO secure shared mem not implemented for mips
-			return ERR_ACCESS_DENIED;
-#else // MIPS_OPTEE_NOT_YET
 			/*
-			 * Strict check that no one else (wich equal or
-			 * less trust) may can access this memory.
-			 *
-			 * Parameters are shared with normal world if they
-			 * aren't in secure DDR.
-			 *
-			 * If the parameters are in secure DDR it's because one
-			 * TA is invoking another TA and in that case there's
-			 * new memory allocated privately for the paramters to
-			 * this TA.
-			 *
-			 * If we do this check for an address on TA
-			 * internal memory it's harmless as it will always
-			 * be in secure DDR.
+			 * Check that no one else with less trust can access
+			 * this memory.
 			 */
-			if (!tee_mm_addr_is_within_range(&tee_mm_sec_ddr, pa))
-				return ERR_ACCESS_DENIED;
-
-#endif // MIPS_OPTEE_NOT_YET
+			if (uflags & UTM_NS_MEM)
+				goto err_exit;
 		}
 
 		if ((flags & TEE_MEMORY_ACCESS_WRITE) && !(uflags & UTM_W))
-			return ERR_ACCESS_DENIED;
+			goto err_exit;
 		if ((flags & TEE_MEMORY_ACCESS_READ) && !(uflags & UTM_R))
-			return ERR_ACCESS_DENIED;
+			goto err_exit;
 	}
 
 	return NO_ERROR;
+
+err_exit:
+	return ERR_ACCESS_DENIED;
 }
 
-#include <lib/syscall.h>
-
-long __SYSCALL sys_check_access_rights(unsigned long flags, const void *buf,
-				       size_t len)
+TEE_Result tee_mmu_check_access_rights(const struct uthread *ut,
+		uint32_t flags, user_addr_t uaddr, size_t len)
 {
-	uthread_t *ut;
-	long res;
+	TEE_Result res;
 
-	ut = uthread_get_current();
-	if (!ut)
-		return TEE_ERROR_BAD_STATE;
-
-	res = tee_mmu_check_access_rights(ut, flags, (user_addr_t)buf, len);
+	res = mmu_check_access_rights(ut, flags, uaddr, len);
 	if (res)
 		return TEE_ERROR_ACCESS_DENIED;
 
 	return TEE_SUCCESS;
 }
 
-static status_t tee_check_user_param_r(user_addr_t usrc, size_t len)
+TEE_Result __SYSCALL sys_check_access_rights(unsigned long flags,
+		const void *buf, uint32_t len)
 {
-	uthread_t *ut;
+	uthread_t *ut = uthread_get_current();
+
+	return tee_mmu_check_access_rights(ut, flags, (user_addr_t)buf, len);
+}
+
+TEE_Result tee_check_user_param_r(user_addr_t usrc, size_t len)
+{
+	TEE_Result res;
+	uthread_t *ut = uthread_get_current();
 	uint32_t flags = TEE_MEMORY_ACCESS_READ | TEE_MEMORY_ACCESS_ANY_OWNER;
 
-	ut = uthread_get_current();
-	if (!ut)
-		return ERR_NOT_VALID;
+	res = mmu_check_access_rights(ut, flags, usrc, len);
+	if (res)
+		return TEE_ERROR_ACCESS_DENIED;
 
-	return tee_mmu_check_access_rights(ut, flags, usrc, len);
+	return TEE_SUCCESS;
+
 }
 
-static status_t tee_check_user_param_w(user_addr_t usrc, size_t len)
+TEE_Result tee_check_user_param_w(user_addr_t usrc, size_t len)
 {
-	uthread_t *ut;
+	TEE_Result res;
+	uthread_t *ut = uthread_get_current();
 	uint32_t flags = TEE_MEMORY_ACCESS_WRITE | TEE_MEMORY_ACCESS_ANY_OWNER;
 
-	ut = uthread_get_current();
-	if (!ut)
-		return ERR_NOT_VALID;
+	res = mmu_check_access_rights(ut, flags, usrc, len);
+	if (res)
+		return TEE_ERROR_ACCESS_DENIED;
 
-	return tee_mmu_check_access_rights(ut, flags, usrc, len);
+	return TEE_SUCCESS;
 }
 
-status_t tee_copy_from_user(void *kdest, user_addr_t usrc, size_t len)
+TEE_Result tee_check_user_param_rw(user_addr_t usrc, size_t len)
 {
-	status_t res;
+	TEE_Result res;
+	uthread_t *ut = uthread_get_current();
+	uint32_t flags = TEE_MEMORY_ACCESS_READ |
+		TEE_MEMORY_ACCESS_WRITE |
+		TEE_MEMORY_ACCESS_ANY_OWNER;
+
+	res = mmu_check_access_rights(ut, flags, usrc, len);
+	if (res)
+		return TEE_ERROR_ACCESS_DENIED;
+
+	return TEE_SUCCESS;
+}
+
+TEE_Result tee_copy_from_user(void *kdest, user_addr_t usrc, size_t len)
+{
+	TEE_Result res;
 
 	res = tee_check_user_param_r(usrc, len);
 	if (res)
-		return ERR_ACCESS_DENIED;
+		return TEE_ERROR_ACCESS_DENIED;
 
 	res = hidden_copy_from_user(kdest, usrc, len);
 	if (res)
-		return ERR_ACCESS_DENIED;
+		return TEE_ERROR_ACCESS_DENIED;
 
-	return NO_ERROR;
+	return TEE_SUCCESS;
 }
 
-status_t tee_copy_to_user(user_addr_t udest, const void *ksrc, size_t len)
+TEE_Result tee_copy_to_user(user_addr_t udest, const void *ksrc, size_t len)
 {
-	status_t res;
+	TEE_Result res;
 
 	res = tee_check_user_param_w(udest, len);
 	if (res)
-		return ERR_ACCESS_DENIED;
+		return TEE_ERROR_ACCESS_DENIED;
 
 	res = hidden_copy_to_user(udest, ksrc, len);
 	if (res)
-		return ERR_ACCESS_DENIED;
+		return TEE_ERROR_ACCESS_DENIED;
 
-	return NO_ERROR;
+	return TEE_SUCCESS;
 }
-#endif /* WITH_GP_API */

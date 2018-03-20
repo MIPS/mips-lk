@@ -28,9 +28,12 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include <stdbool.h>
 
 #include "trusty_ipc.h"
 #include "trusty_uuid.h"
+#include <uapi/mm.h>
+#include <tee_common_uapi.h>
 #include "trusty_syscalls.h"
 
 __NO_RETURN void exit(int status);

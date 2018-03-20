@@ -1,0 +1,31 @@
+default-kernel fiasco -serial_esc
+default-bootstrap bootstrap
+
+entry mips-trusty-svr
+roottask moe rom/mips-trusty-svr.ned --with-proxied-memory
+module l4re
+module ned
+module mips-trusty-svr.ned
+module cons
+module uvmm
+module virtio-trusty-proxy
+module lk.elf
+module virt-mips-svr.dtb
+module vmlinux
+module busybox.rd
+module virt-mips-dev-mipstee.dtb
+
+entry mips-ree-xtest
+roottask moe rom/mips-trusty-svr.ned --with-proxied-memory
+module l4re
+module ned
+module mips-trusty-svr.ned
+module cons
+module uvmm
+module virtio-trusty-proxy
+module lk.elf
+module virt-mips-svr.dtb
+module vmlinux
+module busybox.rd
+module virt-mips-dev-mipstee.dtb
+

@@ -1,0 +1,11 @@
+To build and run these sample TEE trusted applications run:
+
+lk/scripts/do-qemumips-malta -p mips-malta-teetest
+
+The ta_test_client and ta_test_client2 trusted applications use the TEE
+Internal Client API to open a session with the ta_test_server trusted
+application. The ta_test_starter application simulates a REE client opening a
+TA session and is used to trigger the start of the test. This setup
+demonstrates how the libutee-client library can be used to develop and test TA
+code in QEMU without the added complexity of running a hypervisor with REE and
+TEE VMs.

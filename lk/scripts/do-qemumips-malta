@@ -27,7 +27,7 @@ if [[ -z $PROJECT ]]; then
     PROJECT=$DEFAULT_PROJECT
 fi
 
-QEMU="qemu-system-mipsel -machine malta -cpu P5600"
+QEMU="qemu-system-mipsel -machine malta"
 ARGS="-nographic -kernel build-${PROJECT}/lk.elf -gdb tcp::1234"
 
 make $PROJECT -j8 &&

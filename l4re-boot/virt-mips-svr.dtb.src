@@ -1,0 +1,75 @@
+/**
+ * Devic tree for purely virtual guests on the MIPS architecture.
+ */
+
+/dts-v1/;
+
+/include/ "skeleton.dtsi"
+
+
+/ {
+    model = "L4 VM";
+    compatible = "l4,virt", "linux,dummy-virt";
+
+    #address-cells = <1>;
+    #size-cells = <1>;
+
+    cpus {
+      #address-cells = <1>;
+      #size-cells = <0>;
+
+      CPU0: cpu@0 {
+          device_type = "cpu";
+          compatible = "mips,p5600";
+          reg = <0x0>;
+      };
+
+    };
+
+    soc {
+        #address-cells = <1>;
+        #size-cells = <1>;
+        compatible = "simple-bus";
+        ranges;
+
+    cpu_intc: cpu_intc {
+      #address-cells = <0>;
+      compatible = "mti,cpu-interrupt-controller";
+
+      interrupt-controller;
+      #interrupt-cells = <1>;
+    };
+    };
+
+    l4vmm@0 {
+        #address-cells = <1>;
+        #size-cells = <1>;
+        compatible = "simple-bus";
+        ranges = <0x0 0x8000000 0x10000000>;
+
+        virtio_uart@20000 {
+          compatible = "virtio,mmio";
+          reg = <0x20000 0x200>;
+          interrupt-parent = <&cpu_intc>;
+          interrupts = <4>;
+          l4vmm,vdev = "console";
+        };
+
+        virtio_device@30000 {
+          compatible = "trusty-virtio", "virtio-dev,mmio";
+          reg = <0x30000 0x4000
+                 0x8000000 0x8000000>;
+          interrupt-parent = <&cpu_intc>;
+          interrupts = <5>;
+          trusty,shmem = <&tee_shmem>;
+          l4vmm,virtiocap = "viodev";
+        };
+
+        tee_shmem: tee_shmem@100000 {
+            compatible = "trusty-shmem", "l4vmm,l4-mmio";
+            reg = <0x100000 0xa00000>;
+            l4vmm,mmio-cap = "teeshm";
+        };
+    };
+
+};

@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -76,6 +77,8 @@
     ((t0) | ((t1) << 4) | ((t2) << 8) | ((t3) << 12))
 
 #define TEE_PARAM_TYPE_GET(t, i) (((t) >> ((i) * 4)) & 0xF)
+
+#define TEE_PARAM_TYPE_SET(t, i) (((t) & 0xF) << ((i) * 4))
 
 /* Login Types constants */
 #define TEE_LOGIN_PUBLIC            0x00000000
@@ -198,16 +201,24 @@
 #define TEE_ALG_HMAC_SHA256                     0x30000004
 #define TEE_ALG_HMAC_SHA384                     0x30000005
 #define TEE_ALG_HMAC_SHA512                     0x30000006
-#define TEE_ALG_ECDSA_P192                      0x70001042
-#define TEE_ALG_ECDSA_P224                      0x70002042
-#define TEE_ALG_ECDSA_P256                      0x70003042
-#define TEE_ALG_ECDSA_P384                      0x70004042
-#define TEE_ALG_ECDSA_P521                      0x70005042
-#define TEE_ALG_ECDH_P192                       0x80001042
-#define TEE_ALG_ECDH_P224                       0x80002042
-#define TEE_ALG_ECDH_P256                       0x80003042
-#define TEE_ALG_ECDH_P384                       0x80004042
-#define TEE_ALG_ECDH_P521                       0x80005042
+#define TEE_ALG_ECDSA_SHA1                      0x70001042 /* added v1.1.2 */
+#define TEE_ALG_ECDSA_SHA224                    0x70002042 /* added v1.1.2 */
+#define TEE_ALG_ECDSA_SHA256                    0x70003042 /* added v1.1.2 */
+#define TEE_ALG_ECDSA_SHA384                    0x70004042 /* added v1.1.2 */
+#define TEE_ALG_ECDSA_SHA512                    0x70005042 /* added v1.1.2 */
+#define TEE_ALG_ECDH_DERIVE_SHARED_SECRET       0x80000042 /* added v1.1.2 */
+
+/* Algorithm Identifiers from GP v1.1 deprecated in v1.1.2 */
+#define TEE_ALG_ECDSA_P192  TEE_ALG_ECDSA_SHA1
+#define TEE_ALG_ECDSA_P224  TEE_ALG_ECDSA_SHA224
+#define TEE_ALG_ECDSA_P256  TEE_ALG_ECDSA_SHA256
+#define TEE_ALG_ECDSA_P384  TEE_ALG_ECDSA_SHA384
+#define TEE_ALG_ECDSA_P521  TEE_ALG_ECDSA_SHA512
+#define TEE_ALG_ECDH_P192   TEE_ALG_ECDH_DERIVE_SHARED_SECRET
+#define TEE_ALG_ECDH_P224   TEE_ALG_ECDH_DERIVE_SHARED_SECRET
+#define TEE_ALG_ECDH_P256   TEE_ALG_ECDH_DERIVE_SHARED_SECRET
+#define TEE_ALG_ECDH_P384   TEE_ALG_ECDH_DERIVE_SHARED_SECRET
+#define TEE_ALG_ECDH_P521   TEE_ALG_ECDH_DERIVE_SHARED_SECRET
 
 /* Object Types */
 #define TEE_TYPE_AES                    0xA0000010
@@ -270,8 +281,5 @@
 /* Attribute Identifier Flags */
 #define TEE_ATTR_FLAG_VALUE             0x20000000
 #define TEE_ATTR_FLAG_PUBLIC            0x10000000
-
-/* Miscellaneous */
-#define TEE_MAX_32BIT                   0xFFFFFFFF
 
 #endif /* TEE_API_DEFINES_H */

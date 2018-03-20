@@ -1,0 +1,63 @@
+#!/bin/bash
+
+function HELP {
+    echo "help:"
+    echo "-l <l4re build directory>"
+    echo "-k <directory where vmlinux can be found>"
+    echo "-t <target>"
+    echo "-p <project>"
+    echo "-h for help"
+    echo "\Target may be one of: iasim (default), baikal."
+    exit 1
+}
+
+# defaults
+PROJECT='mips-trusty-svr'
+L4RE_BUILD='../../l4re/build-l4re'
+LINUX_BUILD='../../ree/buildroot/output/images'
+IMAGE_TYPE='iasim'
+
+while getopts l:k:t:p:h FLAG; do
+    case $FLAG in
+        l) L4RE_BUILD=$OPTARG;;
+        k) LINUX_BUILD=$OPTARG;;
+        t) IMAGE_TYPE=$OPTARG;;
+        p) PROJECT=$OPTARG;;
+        h) HELP;;
+        \?)
+            echo unrecognized option
+            HELP
+    esac
+done
+
+shift $((OPTIND-1))
+
+if [[ "$IMAGE_TYPE" == "iasim" ]]; then
+    BOOTIMAGE=bootstrap.elf
+    BUILDARGS='PT=malta PLATFORM_RAM_SIZE_MB=1024 elfimage'
+elif [[ "$IMAGE_TYPE" == "baikal" ]]; then
+    BOOTIMAGE=bootstrap.raw
+    BUILDARGS='PT=baikal_t rawimage'
+else
+    echo "Unknown target '$IMAGE_TYPE'."
+    echo "Available targets: iassim, baikal"
+    exit 1
+fi
+
+if [[ ! -f "$LINUX_BUILD/vmlinux" ]]; then
+    echo "Cannot find Linux binary vmlinux in $LINUX_BUILD."
+    exit 1
+fi
+
+LINUX_BUILD="$( cd "$LINUX_BUILD" && pwd )"
+L4RE_BUILD="$( cd "$L4RE_BUILD" && pwd )"
+
+make $PROJECT -j8 &&
+make -C `pwd`/l4re-boot dtb &&
+CROSS_COMPILE=mips-mti-linux-gnu- \
+MODULE_SEARCH_PATH=$LINUX_BUILD:`pwd`/l4re-boot:`pwd`/build-${PROJECT}:$L4RE_BUILD/source/pkg/uvmm/configs \
+make MODULES_LIST=`pwd`/l4re-boot/modules.list -C $L4RE_BUILD E=${PROJECT} $BUILDARGS &&
+cp -L $L4RE_BUILD/images/$BOOTIMAGE build-${PROJECT}/l4reboot.image &&
+echo "Building finished." &&
+echo "The bootable image is now available here: build-${PROJECT}/l4reboot.image" ||
+exit $?

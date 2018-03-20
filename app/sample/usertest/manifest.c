@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-218, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.

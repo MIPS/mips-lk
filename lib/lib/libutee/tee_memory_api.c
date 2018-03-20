@@ -1,33 +1,60 @@
 /*
- * Copyright (C) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
+ * All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ * this list of conditions and the following disclaimer in the documentation
+ * and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <string.h>
 #include <stdlib.h>
 #include <tee_internal_api.h>
+#include <tee_internal_api_extensions.h>
 #include <tee_ta_interface.h>
+
+
+#define TEE_LOCAL_TRACE 0
+#define TEE_TAG "UTEE_MEM"
+
+#define MALLOC_ZERO_MAGIC ((void *)0x10)
+
+/*
+ * Memory element structure; attaches hint and size value to the allocated block
+ * of memory
+ */
+struct mem_elem {
+    struct list_node mem_elem_node;
+    void *buf;
+    uint32_t size;
+    uint32_t hint;
+};
+
+/* List of memory element structures allocated by TA instance */
+static struct list_node mem_elem_list = LIST_INITIAL_VALUE(mem_elem_list);
 
 /* Placeholders for Memory Management Functions */
 
-static void *tee_instance_data;
-
-static TEE_Result syscall_check_access_rights(uint32_t access_flags,
-                                              void *buffer, uint32_t size)
-{
-    return check_access_rights(access_flags, buffer, size);
-}
+static const void *tee_instance_data;
 
 /*
  * The TEE_CheckMemoryAccessRights function causes the Implementation to examine
@@ -141,7 +168,7 @@ static TEE_Result syscall_check_access_rights(uint32_t access_flags,
  *                              accessible with the requested accesses
  */
 TEE_Result TEE_CheckMemoryAccessRights(uint32_t accessFlags, void *buffer,
-                                       uint32_t size)
+                                       size_t size)
 {
     TEE_Result res;
 
@@ -149,14 +176,14 @@ TEE_Result TEE_CheckMemoryAccessRights(uint32_t accessFlags, void *buffer,
         return TEE_SUCCESS;
 
     /* Check access rights against memory mapping */
-    res = syscall_check_access_rights(accessFlags, buffer, size);
+    res = check_access_rights(accessFlags, buffer, size);
     if (res != TEE_SUCCESS)
         goto out;
 
     /*
-    * Check access rights against input parameters
-    * Previous legacy code was removed and will need to be restored
-    */
+     * Check access rights against input parameters
+     * Previous legacy code was removed and will need to be restored
+     */
 
     res = TEE_SUCCESS;
 out:
@@ -193,7 +220,7 @@ out:
  *  - instanceData : A pointer to the global Trusted Application instance data.
  *                   This pointer may be NULL.
  */
-void TEE_SetInstanceData(void *instanceData)
+void TEE_SetInstanceData(const void *instanceData)
 {
     tee_instance_data = instanceData;
 }
@@ -209,7 +236,17 @@ void TEE_SetInstanceData(void *instanceData)
  */
 void *TEE_GetInstanceData(void)
 {
-    return tee_instance_data;
+    return (void *)tee_instance_data;
+}
+
+static struct mem_elem *get_mem_elem_from_buffer(const void *buffer)
+{
+    struct mem_elem *el;
+
+    list_for_every_entry(&mem_elem_list, el, struct mem_elem, mem_elem_node)
+        if (el->buf == buffer)
+            return el;
+    return NULL;
 }
 
 /*
@@ -259,18 +296,41 @@ void *TEE_GetInstanceData(void)
  *        Trusted Application SHOULD panic if the memory pointed to by such a
  *        pointer is accessed for either read or write.
  */
-void *TEE_Malloc(uint32_t size, uint32_t hint)
+void *TEE_Malloc(size_t size, uint32_t hint)
 {
-    void *ptr;
+    void *buf;
+    uint32_t total_size = size + sizeof(struct mem_elem);
 
-    ptr = malloc(size);
-    if (ptr == NULL)
+    if (size > UINT32_MAX - sizeof(struct mem_elem))
         return NULL;
 
-    if (hint == TEE_MALLOC_FILL_ZERO)
-        memset(ptr, 0, size);
+    switch (hint) {
+    case TEE_MALLOC_FILL_ZERO:
+    case TEE_USER_MEM_HINT_NO_FILL_ZERO:
+        break;
+    default:
+        TEE_DBG_MSG("Undefined hint value %d\n", hint);
+        return NULL;
+    }
 
-    return ptr;
+    buf = malloc((size_t)total_size);
+    if (buf != NULL) {
+        struct mem_elem *el = (struct mem_elem *)buf;
+
+        el->size = size;
+        el->hint = hint;
+        if (!size)
+            el->buf = MALLOC_ZERO_MAGIC;
+        else
+            el->buf = (void *)((uint8_t *)buf + sizeof(struct mem_elem));
+        list_add_tail(&mem_elem_list, &el->mem_elem_node);
+        buf = el->buf;
+
+        if (hint == TEE_MALLOC_FILL_ZERO && size)
+            memset(buf, 0, size);
+    }
+
+    return buf;
 }
 
 /*
@@ -308,9 +368,59 @@ void *TEE_Malloc(uint32_t size, uint32_t hint)
  *  - If there is not enough available memory, TEE_Realloc returns a NULL
  *    pointer and the original buffer is still allocated and unchanged.
  */
-void *TEE_Realloc(void *buffer, uint32_t newSize)
+void *TEE_Realloc(const void *buffer, uint32_t newSize)
 {
-     return realloc(buffer, newSize);
+    struct mem_elem *el_old;
+    uint32_t hint, old_size;
+    void *ptr;
+    uint32_t total_size = newSize + sizeof(struct mem_elem);
+    uint32_t resize = 0;
+
+    if (newSize > UINT32_MAX - sizeof(struct mem_elem))
+        return NULL;
+
+    if (!buffer)
+        return TEE_Malloc(newSize, TEE_MALLOC_FILL_ZERO);
+
+    el_old = get_mem_elem_from_buffer(buffer);
+    if (!el_old)
+        TEE_Panic(TEE_ERROR_ITEM_NOT_FOUND);
+
+    hint = el_old->hint;
+    old_size = el_old->size;
+
+    ptr = realloc(el_old, total_size);
+    if (!ptr)
+        return NULL;
+
+    if (newSize > old_size)
+        resize = newSize - old_size;
+
+    if (ptr != el_old) {
+        /* Remove old list entry and add new */
+        list_delete(&el_old->mem_elem_node);
+        struct mem_elem *el_new = (struct mem_elem *)ptr;
+        el_new->size = newSize;
+        el_new->hint = hint;
+        if (newSize)
+            el_new->buf = (void *)((uint8_t *)el_new + sizeof(struct mem_elem));
+        else
+            el_new->buf = MALLOC_ZERO_MAGIC;
+        list_add_tail(&mem_elem_list, &el_new->mem_elem_node);
+        ptr = el_new->buf;
+    } else {
+        if (!newSize)
+            el_old->buf = MALLOC_ZERO_MAGIC;
+        else if (el_old->buf == MALLOC_ZERO_MAGIC && newSize)
+            el_old->buf = (void *)((uint8_t *)el_old + sizeof(struct mem_elem));
+        el_old->size = newSize;
+        ptr = el_old->buf;
+    }
+
+    if (hint == TEE_MALLOC_FILL_ZERO && resize)
+        memset((void *)((uint8_t *)ptr + old_size), 0, resize);
+
+    return ptr;
 }
 
 /*
@@ -323,7 +433,16 @@ void *TEE_Realloc(void *buffer, uint32_t newSize)
  */
 void TEE_Free(void *buffer)
 {
-    free(buffer);
+    if (!buffer)
+        return;
+
+    struct mem_elem *el = get_mem_elem_from_buffer(buffer);
+
+    if (!el)
+        TEE_Panic(TEE_ERROR_ITEM_NOT_FOUND);
+
+    list_delete(&el->mem_elem_node);
+    free(el);
 }
 
 /*

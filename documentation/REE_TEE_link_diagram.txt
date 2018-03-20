@@ -1,0 +1,71 @@
+REE-TEE link diagram
+
+Updated Mar 12, 2018
+====================
+
+
+ Linux REE Virtual Machine                    LK TEE Virtual Machine
+
+ +-----------------------+                  +------------------------+
+ | Client Application    |                  | TEE Session Manager    |
+ +-----------------------+                  +------------------------+
+ | TEE Client API        |    userspace     | regular ipc operations |
+ +-----------------------+                  |  get_msg               |
+ | libteec               |                  |  read_msg              |
+ +-----------^-----------+                  |  put_msg               |
+             |                              |  send_msg              |
+ +-----------v-----------+                  +------------------------+
+ | /dev/tee0 char device |                  | SM ipc port            |
+ +-----------^-----------+                  +------------^-----------+
+             |                                           |
+ +-----------v-----------+                               |
+ | tee device driver     |    kernelspace                |
+ +-----------------------+                               |
+ | mipstee device driver |                               |
+ +-----------------------+                  +------------------------+
+ | operations:           |                  |                        |
+ |  open                 |                  |      tipc rx thread    |
+ |  release              |                  |            &           |
+ |  open_session         |                  |      tipc tx thread    |
+ |  close_session        |                  |            +           |
+ |  invoke_func          |                  +------------------------+
+ |  cancel_req           |                               |
+ +-----------^-----------+                               |
+             |                                           |
+ +-----------v-----------+                  +------------v-----------+
+ | trusty ipc driver     |                  | trusty ipc device      |
+ +-----------------------+                  +------------------------+
+ | operations:           |                  | l4virtio config space  |
+ |  tipc_open            |                  | l4virtio transport     |
+ |  tipc_release         |                  |                        |
+ |  tipc_connect         |                  +------------^-----------+
+ |  tipc_read_iter       |                               |
+ |  tipc_write_iter      |                               |
+ |                       |                               |
+ +-----------------------+                               |
+ | virtio operations:    |                               |
+ |  tipc_virtio_probe    |                               |
+ |                       |                               |
+ +-----------^-----------+                               |
+             |                                           |
+ +-----------v-----------+                  +------------v-----------+
+ | virtio mmio driver    |                  | virtio device          |
+ +-----------^-----------+                  +------------^-----------+
+             |                                           |
+             |                                           |
+-----------------------------------------------------------------------
+             |                                           |
+             |              L4Re Hypervisor              |
+             |                                           |
+ +-----------v---+     +-----------------------+     +---v-----------+
+ |               |     | virtio trusty proxy   |     |               |
+ | uvmm virtual  |     +-----------------------+     | uvmm virtual  |
+ | machine       |     |                       |     | machine       |
+ | monitor       <-----> l4virtio transport    <-----> monitor       |
+ |               |     |                       |     |               |
+ |               |     +-----------------------+     |               |
+ | virtio        |                                   | virtio        |
+ | proxies       |     +-----------------------+     | proxies       |
+ |               <----->   TEE shared memory   <----->               |
+ +---------------+     +-----------------------+     +---------------+
+

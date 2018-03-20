@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-218, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,8 +33,8 @@ static void userspace_fatal_test_div0(void)
 int main(void) {
 	userspace_fatal_test_div0();
 
-	TLOGI("Conditions checked: %d\n", _tests_total);
-	TLOGI("Conditions failed:  %d\n", _tests_failed);
+	TLOGI("Conditions checked: %u\n", _tests_total);
+	TLOGI("Conditions failed:  %u\n", _tests_failed);
 	if (_tests_failed == 0)
 		TLOGI("All tests PASSED\n");
 	else

@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -25,6 +26,8 @@
 #ifndef TEE_API_TYPES_H
 #define TEE_API_TYPES_H
 
+#include <stdint.h>
+#include <stddef.h>
 #include <tee_api_defines.h>
 
 /*
@@ -59,11 +62,11 @@ typedef struct {
  * Which of the field value or memref to select is determined by the
  * parameter type specified in the argument paramTypes passed to the entry
  * point.
-*/
+ */
 typedef union {
     struct {
         void *buffer;
-        uint32_t size;
+        size_t size;
     } memref;
     struct {
         uint32_t a;
@@ -81,7 +84,7 @@ typedef struct __TEE_TASessionHandle *TEE_TASessionHandle;
  * The type of opaque handles on property sets or enumerators. These
  * handles are either one of the pseudo handles TEE_PROPSET_XXX or are
  * returned by the function TEE_AllocatePropertyEnumerator.
-*/
+ */
 typedef struct __TEE_PropSetHandle *TEE_PropSetHandle;
 
 /* Trusted Storage API for Data and Keys types */
@@ -89,8 +92,8 @@ typedef struct {
     uint32_t attributeID;
     union {
         struct {
-            void* buffer;
-            uint32_t length;
+            void *buffer;
+            size_t length;
         } ref;
         struct {
             uint32_t a, b;
@@ -100,8 +103,8 @@ typedef struct {
 
 typedef struct {
     uint32_t objectType;
-    uint32_t keySize;
-    uint32_t maxKeySize;
+    uint32_t objectSize;
+    uint32_t maxObjectSize;
     uint32_t objectUsage;
     uint32_t dataSize;
     uint32_t dataPosition;
@@ -114,9 +117,11 @@ typedef enum {
     TEE_DATA_SEEK_END = 2
 } TEE_Whence;
 
-typedef struct __TEE_ObjectHandle* TEE_ObjectHandle;
+typedef uint32_t TEE_ObjectType;
 
-typedef struct __TEE_ObjectEnumHandle* TEE_ObjectEnumHandle;
+typedef struct __TEE_ObjectHandle *TEE_ObjectHandle;
+
+typedef struct __TEE_ObjectEnumHandle *TEE_ObjectEnumHandle;
 
 /* Cryptographic Operations API */
 typedef enum {
@@ -157,7 +162,7 @@ typedef struct {
     TEE_OperationInfoKey keyInformation[];
 } TEE_OperationInfoMultiple;
 
-typedef struct __TEE_OperationHandle* TEE_OperationHandle;
+typedef struct __TEE_OperationHandle *TEE_OperationHandle;
 
 /* Time API */
 typedef struct {

@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -24,8 +25,8 @@
 #ifndef TEE_API_PROPERTIES_H
 #define TEE_API_PROPERTIES_H
 
-#include <tee_api_types.h>
-#include <sys/types.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 #define TA_PROP_TYPE_BOOL       0
 #define TA_PROP_TYPE_BIN_BLOCK  1
@@ -33,9 +34,10 @@
 #define TA_PROP_TYPE_STR        3
 #define TA_PROP_TYPE_U32        4
 #define TA_PROP_TYPE_UUID       5
-#define TA_PROP_GET_NAME        6
 
-#define MAX_STR 100
+#define TA_FLAGS_SINGLE_INSTANCE (1 << 0)
+#define TA_FLAGS_MULTI_SESSION   (1 << 1)
+#define TA_FLAGS_KEEP_ALIVE      (1 << 2)
 
 struct ta_property {
     const char *name;
@@ -44,12 +46,9 @@ struct ta_property {
 };
 
 struct result_property {
-    char *name;
-    union {
-        uint32_t type;
-        uint32_t prop_size;
-    };
+    uint32_t type;
     void *value;
+    uint32_t value_buf_len;
 };
 
 typedef struct ta_property tee_api_properties_t[];
@@ -57,20 +56,5 @@ typedef struct ta_property tee_api_properties_t[];
 /* manifest section attributes */
 #define TEE_API_PROP_ATTRS \
     __attribute((aligned(4))) __attribute((section(".tee_api.properties")))
-
-TEE_Result TEE_GetPropertyAsBool(TEE_PropSetHandle propsetOrEnumerator, const char* name, bool* value);
-TEE_Result TEE_GetPropertyAsBinaryBlock(TEE_PropSetHandle propsetOrEnumerator, const char* name,
-                                        void *valueBuffer, uint32_t *valueBufferLen);
-TEE_Result TEE_GetPropertyAsIdentity(TEE_PropSetHandle propsetOrEnumerator, const char* name, TEE_Identity *value);
-TEE_Result TEE_GetPropertyAsString(TEE_PropSetHandle propsetOrEnumerator, const char* name,
-                                    char *valueBuffer, uint32_t *valueBufferLen);
-TEE_Result TEE_GetPropertyAsU32(TEE_PropSetHandle propsetOrEnumerator, const char* name, uint32_t *value);
-TEE_Result TEE_GetPropertyAsUUID(TEE_PropSetHandle propsetOrEnumerator, const char* name, TEE_UUID *value);
-TEE_Result TEE_AllocatePropertyEnumerator(TEE_PropSetHandle* enumerator);
-void TEE_FreePropertyEnumerator(TEE_PropSetHandle enumerator);
-void TEE_StartPropertyEnumerator(TEE_PropSetHandle enumerator, TEE_PropSetHandle propSet);
-void TEE_ResetPropertyEnumerator(TEE_PropSetHandle enumerator);
-TEE_Result TEE_GetPropertyName(TEE_PropSetHandle enumerator, void *nameBuffer, uint32_t *nameBufferLen);
-TEE_Result TEE_GetNextProperty(TEE_PropSetHandle enumerator);
 
 #endif /* TEE_API_PROPERTIES_H */

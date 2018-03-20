@@ -1,0 +1,3 @@
+The purpose of this library is to mimic the behavior of GP Client API in the TEE
+world and is intended for use only as a development tool. It is not the part of
+the Trusted Execution Environment itself.

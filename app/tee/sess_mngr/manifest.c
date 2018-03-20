@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016 Imagination Technologies Ltd.
+ * Copyright (c) 2016-2018, MIPS Tech, LLC and/or its affiliated group companies
+ * (“MIPS”).
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,18 +17,16 @@
 
 #include <trusty_app_manifest.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <tee_api_properties.h>
 
-static tee_api_properties_t TEE_API_PROP_ATTRS tee_api_properties =
-{
+static tee_api_properties_t TEE_API_PROP_ATTRS tee_api_properties = {
 	{ "gpd.ta.description", TA_PROP_TYPE_STR, "tee_session_manager"},
 };
 
-static const size_t ta_props_len = sizeof(tee_api_properties) / sizeof(tee_api_properties[0]);
+static const size_t ta_props_len = sizeof(tee_api_properties) /
+				   sizeof(tee_api_properties[0]);
 
-trusty_app_manifest_t TRUSTY_APP_MANIFEST_ATTRS trusty_app_manifest =
-{
+trusty_app_manifest_t TRUSTY_APP_MANIFEST_ATTRS trusty_app_manifest = {
 	/* UUID : {7ea5ad73-d8eb-4859-a206-1746d3c4ccdf} */
 
 	{ 0x7ea5ad73, 0xd8eb, 0x4859,
@@ -36,7 +35,7 @@ trusty_app_manifest_t TRUSTY_APP_MANIFEST_ATTRS trusty_app_manifest =
 	/* optional configuration options here */
 	{
 		/* four pages for heap */
-		TRUSTY_APP_CONFIG_MIN_HEAP_SIZE(4 * 4096),
+		TRUSTY_APP_CONFIG_MIN_HEAP_SIZE(11 * 4096),
 
 		/* enable/disable auto start */
 		TRUSTY_APP_CONFIG_AUTO_START(1),

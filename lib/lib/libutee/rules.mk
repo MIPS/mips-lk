@@ -2,7 +2,7 @@ LOCAL_DIR := $(GET_LOCAL_DIR)
 
 MODULE := $(LOCAL_DIR)
 
-GLOBAL_INCLUDES := $(LOCAL_DIR)/include $(LKROOT)/include $(GLOBAL_INCLUDES)
+GLOBAL_INCLUDES += $(LOCAL_DIR)/include
 
 MODULE_SRCS := \
 	$(LOCAL_DIR)/tee_ta_interface.c \
@@ -16,5 +16,9 @@ MODULE_SRCS := \
 	$(LOCAL_DIR)/tee_crypto_api.c \
 	$(LOCAL_DIR)/tee_time_api.c \
 	$(LOCAL_DIR)/tee_arithmetic_api.c \
+
+MODULE_DEPS := \
+	lib/libmpa \
+	lib/libutils \
 
 include make/module.mk

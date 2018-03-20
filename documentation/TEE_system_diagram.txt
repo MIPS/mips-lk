@@ -1,0 +1,74 @@
+TEE system diagram
+
+Updated Mar 12, 2018
+====================
+
+
+ Linux REE Virtual Machine                                       LK TEE Virtual Machine
+
+ +-----------------------+                +-----------------------------+         +-----------------------------+
+ | Client Application    |   userspace    | TEE Session Manager         |         | Trusted Application         |
+ +-----------------------+                +-----------------------------+         +-----------------------------+
+ | TEE Client API        |                | operations:                 |         | TEE Internal Core API       |
+ +-----------------------+                |  processes REE and TEE      |         |  Trusted Core Framework API |
+ | libteec               |                |   client requests           |         |  Trusted Storage API        |
+ +-----------^-----------+                |  implements some TEE        |         |  Crypto Operations API      |
+             |                            |   Internal Core API         |         |  Time API                   |
+ +-----------v-----------+                |   functionality             |         |  TEE Arithmetical API       |
+ | /dev/tee0 char device |                |                             |         +-----------------------------+
+ +-----------^-----------+                |                             |         | libutee                     |
+             |                            +-----------------------------+         +-----------------------------+
+             |                            | SM ipc port                 <---------> TA ipc port                 |
+             |                            +--------------^---------+----+         +--------------+--------------+
+             |                                           |         |                             |
+             |                                           |         |                             |
+ +-----------v-----------+                               |    +----v-----------------------------v--------------+
+ | tee device driver     |   kernelspace                 |    | TEE Trusted Core Framework                      |
+ +-----------------------+                               |    +-------------------------------------------------+
+ | mipstee device driver |                               |    |                                                 |
+ +-----------------------+                               |    |  TEE Internal Core API functionality            |
+ | operations:           |                               |    |  libutee syscall implementation                 |
+ |  open                 |                               |    |  Session Manager syscall implementation         |
+ |  release              |                               |    |                                                 |
+ |  open_session         |                               |    +-------------------------+-----------------------+
+ |  close_session        |                               |                              |
+ |  invoke_func          |                               |                              |
+ |  cancel_req           |                               |                              |
+ +-----------^-----------+                               |                              |
+             |                                           |                              |
+ +-----------v-----------+                               |                              |
+ | trusty ipc driver     |                               |                              |
+ +-----------------------+                               |                              |
+ | operations:           |                               |                              |
+ |  tipc_open            |                               |                              |
+ |  tipc_release         |                +---------------------------------------------v-------------------------+
+ |  tipc_connect         |                |              |                                                        |
+ |  tipc_read_iter       |                |              |                  +-----------------------------------+ |
+ |  tipc_write_iter      |                |              |                  | Trusty OS (Little Kernel)         | |
+ |                       |                |              |                  +-----------------------------------+ |
+ +-----------------------+                |              |                  |                                   | |
+ | virtio operations:    |                | +------------v-------------+    |  thread management                | |
+ |  tipc_virtio_probe    |                | |                          |    |  memory management                | |
+ |                       |                | | trusty ipc virtio device |    |  ipc functionality                | |
+ +-----------^-----------+                | | l4virtio transport       |    |  trusted app instantiation        | |
+             |                            | |                          |    |  platform and arch specific code  | |
+ +-----------v-----------+                | +------------^-------------+    |                                   | |
+ | virtio mmio transport |                |              |                  +-----------------------------------+ |
+ +-----------^-----------+                |              |                                                        |
+             |                            +-----------------------------------------------------------------------+
+             |                                           |
+=========================================================|==========================================================
+             |                                           |
+             |              L4Re Hypervisor              |
+             |                                           |
+ +-----------v---+     +-----------------------+     +---v-----------+
+ |               |     | virtio trusty proxy   |     |               |
+ | uvmm virtual  |     +-----------------------+     | uvmm virtual  |
+ | machine       |     |                       |     | machine       |
+ | monitor       <-----> l4virtio transport    <-----> monitor       |
+ |               |     |                       |     |               |
+ |               |     +-----------------------+     |               |
+ | virtio        |                                   | virtio        |
+ | proxies       |     +-----------------------+     | proxies       |
+ |               <----->   TEE shared memory   <----->               |
+ +---------------+     +-----------------------+     +---------------+
